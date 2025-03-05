@@ -102,17 +102,18 @@ def generate_launch_description():
                 '-s', HOME + '/PX4-Autopilot/ROMFS/px4fmu_common/init.d-posix/rcS',
             ],
             cwd=PX4_RUN_DIR,
+            shell=True,
             output='screen'
         ),
 
         # Delay Micro XRCE-DDS Agent startup (avoid race conditions)
-        TimerAction(
-            period=10.0,
-            actions=[
-                ExecuteProcess(
-                    cmd=['MicroXRCEAgent', 'udp4', '-p', '8888'],
-                    output='screen'
-                )
-            ]
-        ),
+        # TimerAction(
+        #     period=10.0,
+        #     actions=[
+        #         ExecuteProcess(
+        #             cmd=['MicroXRCEAgent', 'udp4', '-p', '8888'],
+        #             output='screen'
+        #         )
+        #     ]
+        # ),
     ])

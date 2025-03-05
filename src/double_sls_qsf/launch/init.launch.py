@@ -42,18 +42,12 @@ def generate_launch_description():
         ),
 
         # Set Drone ID and Estimator Type
-        DeclareLaunchArgument('drone_id', default_value='1', description='PX4 Drone ID'), 
+        DeclareLaunchArgument('drone_id', default_value='0', description='PX4 Drone ID'), 
         SetEnvironmentVariable('PX4_SIM_DRONE_ID', LaunchConfiguration('drone_id')),
         SetEnvironmentVariable('PX4_MAV_SYS_ID', LaunchConfiguration('drone_id')),
         DeclareLaunchArgument('est', default_value='ekf2', description='PX4 Estimator Type'),
         SetEnvironmentVariable('PX4_ESTIMATOR', LaunchConfiguration('est')),
-
-        # Copy airframe files to PX4 run directory (fixes missing model issue)
-        ExecuteProcess(
-            cmd=['cp', '-r', PX4_AIRFRAMES_DIR, os.path.join(PX4_RUN_DIR, 'etc/init.d-posix/')],
-            output='screen'
-        ),
-
+        
         # Declare launch arguments
         DeclareLaunchArgument('world', default_value=world_path),
         DeclareLaunchArgument('model', default_value=model_path),
@@ -105,10 +99,13 @@ def generate_launch_description():
                 '-s', HOME + '/PX4-Autopilot/ROMFS/px4fmu_common/init.d-posix/rcS',
             ],
             cwd=PX4_RUN_DIR,
-            output='screen'),
+            shell=True,
+            prefix="xterm -hold -e",
+            output='screen'
+        ),
+
 
         # Start Micro XRCE-DDS Agent for ROS2 <--> PX4 communication
-        # maybe can be done by user manually
         ExecuteProcess(
             cmd=['MicroXRCEAgent', 'udp4', '-p', '8888'],
             output='screen'),
