@@ -103,17 +103,18 @@ def generate_launch_description():
             ],
             cwd=PX4_RUN_DIR,
             shell=True,
+            prefix="xterm -hold -e",
             output='screen'
         ),
 
         # Delay Micro XRCE-DDS Agent startup (avoid race conditions)
-        # TimerAction(
-        #     period=10.0,
-        #     actions=[
-        #         ExecuteProcess(
-        #             cmd=['MicroXRCEAgent', 'udp4', '-p', '8888'],
-        #             output='screen'
-        #         )
-        #     ]
-        # ),
+        TimerAction(
+            period=10.0,
+            actions=[
+                ExecuteProcess(
+                    cmd=['MicroXRCEAgent', 'udp4', '-p', '8888'],
+                    output='screen'
+                )
+            ]
+        ),
     ])

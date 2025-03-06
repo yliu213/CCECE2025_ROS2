@@ -9,10 +9,15 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <build_depend>libeigen3-dev</build_depend>
+
+  <exec_depend>libeigen3-dev</exec_depend>
   <exec_depend>ros2launch</exec_depend> <!--for ros2 launch-->
 
   <depend>rclcpp</depend>
   <depend>px4_msgs</depend>
+  <depend>gazebo_msgs</depend>
+
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

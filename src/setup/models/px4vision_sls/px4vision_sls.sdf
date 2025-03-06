@@ -153,7 +153,6 @@
     <child>battery</child>
     <parent>px4vision::base_link</parent>
   </joint>   -->
-
-
+    
   </model>
 </sdf>
