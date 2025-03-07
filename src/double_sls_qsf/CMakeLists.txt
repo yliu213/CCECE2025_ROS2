@@ -9,6 +9,7 @@ find_package(px4_msgs REQUIRED)
 find_package(gazebo_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(controller_msgs REQUIRED)
 
 #################
 # Setup targets #
@@ -16,7 +17,7 @@ find_package(geometry_msgs REQUIRED)
 
 # add executables
 add_executable(sls_qsf src/main_node.cpp)
-ament_target_dependencies(sls_qsf rclcpp px4_msgs gazebo_msgs geometry_msgs)
+ament_target_dependencies(sls_qsf rclcpp px4_msgs gazebo_msgs geometry_msgs controller_msgs)
 
 # Make sure Eigen's include path is used
 target_include_directories(sls_qsf PUBLIC 
