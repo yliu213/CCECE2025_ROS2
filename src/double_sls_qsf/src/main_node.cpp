@@ -419,7 +419,7 @@ Eigen::Vector3d SLSQSF::applyQuasiSlsCtrl(){
     for(int i=0; i<12;i++){
        sls_state_array[i] = sls_state_.sls_state[i]; 
     }
-    const double t = (this->get_clock()->now() - traj_tracking_last_called_).seconds();
+    const double t = this->get_clock()->now().seconds() - traj_tracking_last_called_.seconds(); 
     // QSFGeometricController(sls_state_array, K, param, ref, t, target_force_ned); // generated from MATLAB
 
     // // if(std::abs(target_force_ned[0]) > 2 ) {
