@@ -437,7 +437,7 @@ void SLSQSF::exeControl(void){
         desired_acc = applyQuasiSlsCtrl();
         computeBodyRateCmd(cmdBodyRate_, desired_acc);
         if(ctrl_enabled_){
-           pubRateCommands(cmdBodyRate_, q_des_);  // <- in progress
+           //pubRateCommands(cmdBodyRate_, q_des_);  // <- in progress
         }
     //     else{
     //         // use px4's position controller
@@ -448,27 +448,27 @@ void SLSQSF::exeControl(void){
     }
 }
 
-void mrotorCtrl::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude) {
-    //copied from korean repo
-    mavros_msgs::AttitudeTarget msg;
-    msg.header.stamp = ros::Time::now();
-    msg.header.frame_id = "map";
-    msg.body_rate.x = cmd(0);
-    msg.body_rate.y = cmd(1);
-    msg.body_rate.z = cmd(2);
-    if(rate_ctrl_enabled_){
-        msg.type_mask = 128;  // Ignore orientation messages, only use body rate
-    }
-    else {
-        msg.type_mask = 1|2|4; //ignore body rate, only use orientation
-    }
-    msg.orientation.w = target_attitude(0);
-    msg.orientation.x = target_attitude(1);
-    msg.orientation.y = target_attitude(2);
-    msg.orientation.z = target_attitude(3);
-    msg.thrust = cmd(3);
-    target_attitude_pub_.publish(msg);
-}
+// void mrotorCtrl::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude) {
+//     //copied from korean repo
+//     mavros_msgs::AttitudeTarget msg;
+//     msg.header.stamp = ros::Time::now();
+//     msg.header.frame_id = "map";
+//     msg.body_rate.x = cmd(0);
+//     msg.body_rate.y = cmd(1);
+//     msg.body_rate.z = cmd(2);
+//     if(rate_ctrl_enabled_){
+//         msg.type_mask = 128;  // Ignore orientation messages, only use body rate
+//     }
+//     else {
+//         msg.type_mask = 1|2|4; //ignore body rate, only use orientation
+//     }
+//     msg.orientation.w = target_attitude(0);
+//     msg.orientation.x = target_attitude(1);
+//     msg.orientation.y = target_attitude(2);
+//     msg.orientation.z = target_attitude(3);
+//     msg.thrust = cmd(3);
+//     target_attitude_pub_.publish(msg);
+// }
 
 void SLSQSF::computeBodyRateCmd(Eigen::Vector4d &bodyrate_cmd, const Eigen::Vector3d &a_des) {
     q_des_ = acc2quaternion(a_des, mavYaw_);
