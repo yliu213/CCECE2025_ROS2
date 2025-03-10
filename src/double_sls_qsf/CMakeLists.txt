@@ -16,8 +16,23 @@ find_package(controller_msgs REQUIRED)
 #################
 
 # add executables
-add_executable(sls_qsf src/main_node.cpp)
-ament_target_dependencies(sls_qsf rclcpp px4_msgs gazebo_msgs geometry_msgs controller_msgs)
+add_executable(sls_qsf 
+  src/main_node.cpp
+  # for MATLAB generated code
+  src/QSFGeometricController/QSFGeometricController.cpp
+  src/QSFGeometricController/rt_nonfinite.cpp
+  src/QSFGeometricController/rtGetInf.cpp
+  src/QSFGeometricController/rtGetNaN.cpp
+  # for inner loop controller
+  src/nonlinear_attitude_control.cpp
+)
+ament_target_dependencies(sls_qsf 
+  rclcpp 
+  px4_msgs 
+  gazebo_msgs 
+  geometry_msgs 
+  controller_msgs
+)
 
 # Make sure Eigen's include path is used
 target_include_directories(sls_qsf PUBLIC 

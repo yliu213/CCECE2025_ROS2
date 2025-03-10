@@ -54,6 +54,8 @@
 #include "double_sls_qsf/LowPassFilter.hpp"
 #include "controller_msgs/msg/sls_state.hpp"
 #include "controller_msgs/msg/sls_force.hpp"
+#include "double_sls_qsf/QSFGeometricController.h"
+#include "double_sls_qsf/nonlinear_attitude_control.h"
 
 using namespace std::chrono;
 using namespace std::chrono_literals;
@@ -72,6 +74,8 @@ public:
 		// format: this->declare_parameter<type>("parameter_name", default_value);
 		lpf_enabled_ = this->declare_parameter<bool>("lpf_enabled_", false);
 		finite_diff_enabled_ = this->declare_parameter<bool>("finite_diff_enabled_", true);
+        drag_comp_enabled_ = this->declare_parameter<bool>("drag_comp_enabled_", false);
+        ctrl_enabled_ = this->declare_parameter<bool>("ctrl_enabled_", false);
 
 		// Physical Parameters
 		mass_ = this->declare_parameter<double>("mass_", 1.56);
@@ -106,6 +110,23 @@ public:
 		ph_y_ = this->declare_parameter<double>("ph_y_", 0.0);    
 		ph_z_ = this->declare_parameter<double>("ph_z_", 0.0); 
 
+        // drone physical parameters
+        max_fb_acc_ = this->declare_parameter<double>("max_fb_acc_", 9.0);
+
+        // drone Yaw
+        mavYaw_ = this->declare_parameter<double>("mavYaw_", 0.0);
+        // attitude controller
+        attctrl_tau = this->declare_parameter<double>("attctrl_tau", 0.3);
+
+        // rotor drag compensation
+        rotorDragD_x_ = this->declare_parameter<double>("rotorDragD_x_", 0.0);
+        rotorDragD_y_ = this->declare_parameter<double>("rotorDragD_y_", 0.0);
+        rotorDragD_z_ = this->declare_parameter<double>("rotorDragD_z_", 0.0);
+
+        // throttle normalization
+        norm_thrust_const_ = this->declare_parameter<double>("norm_thrust_const_", 0.05055);
+        norm_thrust_offset_ = this->declare_parameter<double>("norm_thrust_offset_", 0.0);
+
 		// LPFs
 		double load_vel_cutoff_freq = this->declare_parameter<double>("load_vel_cutoff_freq", 30);
 		double load_vel_q = this->declare_parameter<double>("load_vel_q", 0.625);
@@ -135,11 +156,19 @@ public:
 		Vel_ << 0.0, 0.0, 0.0; // current velocity
 		Kpos_ << -Kpos_x_, -Kpos_y_, -Kpos_z_;
     	Kvel_ << -Kvel_x_, -Kvel_y_, -Kvel_z_;
+        targetJerk_ = Eigen::Vector3d::Zero();
 
 		targetPos_ << c_x_, c_y_, c_z_; 
 		targetRadium_ << r_x_, r_y_, r_z_;
 		targetFrequency_ << fr_x_, fr_y_, fr_z_;
 		targetPhase_ << ph_x_, ph_y_, ph_z_;
+
+        controller_ = std::make_shared<NonlinearAttitudeControl>(attctrl_tau); // initialize the ptr
+        if (controller_) {
+            RCLCPP_INFO(this->get_logger(), "controller_ is initialized");  // check if the controller is initialized
+        } else {
+            RCLCPP_WARN(this->get_logger(), "controller_ is nullptr!");
+        }
 
 		// initialization complete
 		RCLCPP_INFO(this->get_logger(),"Initialization Complete");
@@ -186,6 +215,9 @@ private:
 	rclcpp::Time gazebo_last_called_;
 	rclcpp::Time traj_tracking_last_called_;
 
+    // shared pointers
+    std::shared_ptr<Control> controller_;
+
 	// LPFS
 	std::unique_ptr<SecondOrderFilter<Eigen::Vector3d>> load_vel_filter_;
 	std::unique_ptr<SecondOrderFilter<Eigen::Vector3d>> vel_filter_;
@@ -194,8 +226,10 @@ private:
 	bool gazebo_link_name_matched_ = false;  // gazebo link indices
 	bool init_complete_;
 	bool lpf_enabled_ = false;
+    bool drag_comp_enabled_ = false;
 	bool finite_diff_enabled_;
 	bool traj_tracking_enabled_, traj_tracking_enabled_last_;
+    bool ctrl_enabled_;
 
 	// ints
 	uint64_t offboard_setpoint_counter_;
@@ -206,13 +240,18 @@ private:
 	// doubles
 	double diff_t_; // time difference
 	double Kpos_x_, Kpos_y_, Kpos_z_, Kvel_x_, Kvel_y_, Kvel_z_, Kacc_x_, Kacc_y_, Kacc_z_, Kjer_x_, Kjer_y_, Kjer_z_; // controller gains
-	double load_mass_, cable_length_, mass_;
+	double load_mass_, cable_length_, mass_, max_fb_acc_;
 	double gravity_acc_ = 9.80665;
 
 	double c_x_, c_y_, c_z_;    
 	double r_x_, r_y_, r_z_;   
 	double fr_x_, fr_y_, fr_z_;
 	double ph_x_, ph_y_, ph_z_; // reference trajectory parameters
+
+    double mavYaw_; 
+    double norm_thrust_const_, norm_thrust_offset_; // throttle normalization
+    double attctrl_tau; // not defined in class in ros1 repo
+    double rotorDragD_x_, rotorDragD_y_, rotorDragD_z_;
 
 	// vectors
 	Eigen::Vector3d Pos_, loadPos_, pendAngle_; // positon
@@ -224,12 +263,17 @@ private:
 	Eigen::Vector3d loadAcc_, pendAngularAcc_; // acceleration
 	Eigen::Vector3d loadAcc_prev_, pendAngularAcc_prev_; // previous acceleration
 
-	Eigen::Vector4d Att_, Att_prev_; // orientation	
+	Eigen::Vector4d Att_, Att_prev_, q_des_; // orientation	
+    Eigen::Vector4d cmdBodyRate_;  //{wx, wy, wz, Thrust}
 
 	Eigen::Vector3d targetRadium_, targetFrequency_, targetPhase_; // reference trajectory parameters
 	Eigen::Vector3d targetPos_; // control target position
 
+    Eigen::Vector3d targetJerk_;
 	Eigen::Vector3d Kpos_, Kvel_;
+    Eigen::Vector3d rotorDragD_;
+
+    Eigen::Vector3d gravity_{Eigen::Vector3d(0.0, 0.0, -9.80665)};
 
 	// controller msgs
 	SlsState sls_state_raw_; 
@@ -251,6 +295,10 @@ private:
 	void loadSlsState();
 	void exeControl(void);
 	Eigen::Vector3d applyQuasiSlsCtrl();
+    Eigen::Vector3d compensateRotorDrag(double t);
+    Eigen::Vector3d transformPose(Eigen::Vector3d oldPose, Eigen::Vector3d offsetVector);
+    Eigen::Vector4d acc2quaternion(const Eigen::Vector3d &vector_acc, const double &yaw);
+    void computeBodyRateCmd(Eigen::Vector4d &bodyrate_cmd, const Eigen::Vector3d &a_des);
 };
 
 
@@ -386,11 +434,11 @@ void SLSQSF::exeControl(void){
         traj_tracking_enabled_last_ = traj_tracking_enabled_;
 
         Eigen::Vector3d desired_acc;
-        desired_acc = applyQuasiSlsCtrl(); // <- in progress
-    //     computeBodyRateCmd(cmdBodyRate_, desired_acc);
-    //     if(ctrl_enabled_){
-    //         pubRateCommands(cmdBodyRate_, q_des_); 
-    //     }
+        desired_acc = applyQuasiSlsCtrl();
+        computeBodyRateCmd(cmdBodyRate_, desired_acc);
+        if(ctrl_enabled_){
+           pubRateCommands(cmdBodyRate_, q_des_);  // <- in progress
+        }
     //     else{
     //         // use px4's position controller
     //         pubTargetPose(pos_x_0_, pos_y_0_, pos_z_0_);
@@ -400,7 +448,36 @@ void SLSQSF::exeControl(void){
     }
 }
 
-// in progress
+void mrotorCtrl::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude) {
+    //copied from korean repo
+    mavros_msgs::AttitudeTarget msg;
+    msg.header.stamp = ros::Time::now();
+    msg.header.frame_id = "map";
+    msg.body_rate.x = cmd(0);
+    msg.body_rate.y = cmd(1);
+    msg.body_rate.z = cmd(2);
+    if(rate_ctrl_enabled_){
+        msg.type_mask = 128;  // Ignore orientation messages, only use body rate
+    }
+    else {
+        msg.type_mask = 1|2|4; //ignore body rate, only use orientation
+    }
+    msg.orientation.w = target_attitude(0);
+    msg.orientation.x = target_attitude(1);
+    msg.orientation.y = target_attitude(2);
+    msg.orientation.z = target_attitude(3);
+    msg.thrust = cmd(3);
+    target_attitude_pub_.publish(msg);
+}
+
+void SLSQSF::computeBodyRateCmd(Eigen::Vector4d &bodyrate_cmd, const Eigen::Vector3d &a_des) {
+    q_des_ = acc2quaternion(a_des, mavYaw_);
+    controller_ -> Update(Att_, q_des_, a_des, targetJerk_); 
+    bodyrate_cmd.head(3) = controller_->getDesiredRate();
+    double thrust_command = controller_->getDesiredThrust().z();
+    bodyrate_cmd(3) = std::max(0.0, std::min(1.0, norm_thrust_const_ * thrust_command + norm_thrust_offset_));  
+}
+
 Eigen::Vector3d SLSQSF::applyQuasiSlsCtrl(){
     double target_force_ned[3];
     double K[10] = {Kpos_x_, Kvel_x_, Kacc_x_, Kjer_x_, Kpos_y_, Kvel_y_, Kacc_y_, Kjer_y_, Kpos_z_, Kvel_z_};
@@ -420,45 +497,119 @@ Eigen::Vector3d SLSQSF::applyQuasiSlsCtrl(){
        sls_state_array[i] = sls_state_.sls_state[i]; 
     }
     const double t = this->get_clock()->now().seconds() - traj_tracking_last_called_.seconds(); 
-    // QSFGeometricController(sls_state_array, K, param, ref, t, target_force_ned); // generated from MATLAB
+    QSFGeometricController(sls_state_array, K, param, ref, t, target_force_ned);
 
-    // // if(std::abs(target_force_ned[0]) > 2 ) {
-    // //     target_force_ned[0] = std::copysign(2, target_force_ned[0]);
-    // // }
+    sls_force_.header.stamp = this->get_clock()->now();
+    sls_force_.sls_force[0] = target_force_ned[0];
+    sls_force_.sls_force[1] = target_force_ned[1];
+    sls_force_.sls_force[2] = target_force_ned[2];
+    sls_force_pub_ -> publish(sls_force_);
 
-    // // if(std::abs(target_force_ned[1]) > 2 ) {
-    // //     target_force_ned[1] = std::copysign(2,target_force_ned[1]);
-    // // }
+    Eigen::Vector3d a_des;
+    a_des(0) = target_force_ned[1] / mass_;
+    a_des(1) = target_force_ned[0] / mass_;
+    a_des(2) = -target_force_ned[2] / mass_;
 
-    // sls_force_.header.stamp = ros::Time::now();
-    // sls_force_.sls_force[0] = target_force_ned[0];
-    // sls_force_.sls_force[1] = target_force_ned[1];
-    // sls_force_.sls_force[2] = target_force_ned[2];
-    // sls_force_pub_.publish(sls_force_);
-    // // ROS_INFO_STREAM("SLS Force: " << target_force_ned[2]);
-    // Eigen::Vector3d a_des;
-    // a_des(0) = target_force_ned[1] / mass_;
-    // a_des(1) = target_force_ned[0] / mass_;
-    // a_des(2) = -target_force_ned[2] / mass_;
+    Eigen::Vector3d a_fb = a_des + gravity_;
 
-    // Eigen::Vector3d a_fb = a_des + gravity_;
+    if (a_fb.norm() > max_fb_acc_)
+    a_fb = (max_fb_acc_ / a_fb.norm()) * a_fb; 
 
-    // if (a_fb.norm() > max_fb_acc_)
-    // a_fb = (max_fb_acc_ / a_fb.norm()) * a_fb; 
+    // rotor drag compensation
+    Eigen::Vector3d a_rd;
+    if(drag_comp_enabled_) {
+        a_rd = compensateRotorDrag(t);
+    }
+    else {
+        a_rd = Eigen::Vector3d::Zero();
+    } 
 
-    // // rotor drag compensation
-    // Eigen::Vector3d a_rd;
-    // if(drag_comp_enabled_) {
-    //     a_rd = compensateRotorDrag(t);
-    // }
-    // else {
-    //     a_rd = Eigen::Vector3d::Zero();
-    // } 
-
-    // a_des = a_fb - a_rd - gravity_;
+    a_des = a_fb - a_rd - gravity_;
+    RCLCPP_INFO(this->get_logger(),"a_des: %f, %f, %f", a_des(0), a_des(1), a_des(2));
     
-    // return a_des;
-	return Eigen::Vector3d::Zero(); // for test only, remove later
+    return a_des;
+}
+
+Eigen::Vector3d SLSQSF::compensateRotorDrag(double t) {
+    bool use_feedback = true;
+    // mav vel ref
+    Eigen::Vector3d loadVelRDC, loadAccRDC, loadVelFF, loadAccFF, loadVelFB, loadAccFB;
+    loadVelFF(0) = targetRadium_(0) * targetFrequency_(0) * std::cos(targetFrequency_(0) * t + targetPhase_(0));
+    loadVelFF(1) = targetRadium_(1) * targetFrequency_(1) * std::cos(targetFrequency_(1) * t + targetPhase_(1));
+    loadVelFF(2) = targetRadium_(2) * targetFrequency_(2) * std::cos(targetFrequency_(2) * t + targetPhase_(2));
+    loadAccFF(0) = -targetRadium_(0) * std::pow(targetFrequency_(0), 2) * std::sin(targetFrequency_(0) * t + targetPhase_(0));
+    loadAccFF(1) = -targetRadium_(1) * std::pow(targetFrequency_(1), 2) * std::sin(targetFrequency_(1) * t + targetPhase_(1));
+    loadAccFF(2) = -targetRadium_(2) * std::pow(targetFrequency_(2), 2) * std::sin(targetFrequency_(2) * t + targetPhase_(2));
+    loadVelFB = loadVel_;
+    loadAccFB = loadAcc_;
+
+    if(traj_tracking_enabled_) {
+        loadVelRDC = loadVelFF;
+        loadAccRDC = loadAccFF;
+    }
+    else if(use_feedback) {
+        loadVelRDC = loadVelFB;
+        loadAccRDC = loadAccFB;
+    }
+    else {
+        loadVelRDC = Eigen::Vector3d::Zero();
+        loadAccRDC = Eigen::Vector3d::Zero();
+    }
+    
+    const Eigen::Vector3d mavVelRef = transformPose(loadVelRDC, -pendRate_);
+    const Eigen::Vector3d mavAccRef = transformPose(loadAccRDC, -pendAngularAcc_);
+
+    // mav RotMat ref
+    const Eigen::Vector4d q_ref = acc2quaternion(mavAccRef - gravity_, mavYaw_);
+    const Eigen::Matrix3d R_ref = quat2RotMatrix(q_ref);
+
+    // drag coefficient
+    rotorDragD_ << rotorDragD_x_, rotorDragD_y_, rotorDragD_z_;
+
+    // Rotor Drag compensation
+    const Eigen::Vector3d a_rd = -R_ref * rotorDragD_.asDiagonal() * R_ref.transpose() * mavVelRef;  // Rotor drag
+
+    return a_rd;
+}
+
+Eigen::Vector4d SLSQSF::acc2quaternion(const Eigen::Vector3d &vector_acc, const double &yaw) {
+    // convert acceleration vector to quaternion
+    // copied from korean repo
+    Eigen::Vector4d quat;
+    Eigen::Vector3d zb_des, yb_des, xb_des, proj_xb_des;
+    Eigen::Matrix3d rotmat;
+
+    proj_xb_des << std::cos(yaw), std::sin(yaw), 0.0;
+
+    zb_des = vector_acc / vector_acc.norm();
+    yb_des = zb_des.cross(proj_xb_des) / (zb_des.cross(proj_xb_des)).norm();
+    xb_des = yb_des.cross(zb_des) / (yb_des.cross(zb_des)).norm();
+
+    rotmat << xb_des(0), yb_des(0), zb_des(0), xb_des(1), yb_des(1), zb_des(1), xb_des(2), yb_des(2), zb_des(2);
+    quat = rot2Quaternion(rotmat);
+    return quat;
+}
+
+Eigen::Vector3d SLSQSF::transformPose(Eigen::Vector3d oldPose, Eigen::Vector3d offsetVector) {
+    Eigen::Vector3d newPose;
+    Eigen::Vector4d oldPose4, newPose4;
+    Eigen::Matrix4d transMatrix;
+
+    // >>> Translation Matrix
+    transMatrix <<  1, 0, 0, offsetVector(0),
+                    0, 1, 0, offsetVector(1),
+                    0, 0, 1, offsetVector(2), 
+                    0, 0, 0, 1;
+
+    // >>> old pose
+    oldPose4.head(3) = oldPose;
+    oldPose4(3) = 1;
+
+    // >>> new pose
+    newPose4 = transMatrix*oldPose4;
+    newPose = newPose4.head(3);
+
+    return newPose;
 }
 
 void SLSQSF::applyLowPassFilterFiniteDiff(void) {

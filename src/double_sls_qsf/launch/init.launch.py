@@ -22,10 +22,11 @@ def generate_launch_description():
     gazebo_launch_dir = os.path.join(get_package_share_directory('gazebo_ros'), 'launch')
 
     # world path
-    world_path = os.path.join(HOME, 'PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic/worlds/empty.world')
-
+    world_path = os.path.join(HOME, 'PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic/worlds/empty.world') # modify gazebo classic world file
+     
     # model path
     setup_package_path = get_package_share_directory('setup')
+    #world_path = os.path.join(setup_package_path, 'worlds/empty.world') # not working properly
     model_path = os.path.join(setup_package_path, 'models/px4vision_sls/px4vision_sls.sdf')
     # SetEnvironmentVariable('GAZEBO_MODEL_PATH', os.path.join(setup_package_path, 'models'))
 

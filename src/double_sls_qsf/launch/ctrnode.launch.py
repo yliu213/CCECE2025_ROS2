@@ -13,6 +13,8 @@ def generate_launch_description():
                 'lpf_enabled_': True,
                 'finite_diff_enabled_': True,
                 'traj_tracking_enabled_': False,
+                'drag_comp_enabled_': True,
+                'ctrl_enabled_': True,
                 'Kpos_x_':24.0,
                 'Kpos_y_':24.0,
                 'Kpos_z_':2.0,
@@ -39,7 +41,14 @@ def generate_launch_description():
                 'fr_z':0.0,
                 'ph_x':1.57,
                 'ph_y':0.0,
-                'ph_z':0.0
+                'ph_z':0.0,
+                'max_fb_acc_': 20.0,
+                'rotorDragD_x_':1.25,
+                'rotorDragD_y_':1.25,
+                'rotorDragD_z_':0.0,
+                'norm_thrust_const_':0.034436,
+                'norm_thrust_offset_':0.14344,
+                'attctrl_tau_':0.1,
             }]
         )
     ])
