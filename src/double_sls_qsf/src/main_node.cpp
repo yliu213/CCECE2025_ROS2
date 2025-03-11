@@ -1,53 +1,20 @@
-// /****************************************************************************
-//  *
-//  * Copyright 2020 PX4 Development Team. All rights reserved.
-//  *
-//  * Redistribution and use in source and binary forms, with or without
-//  * modification, are permitted provided that the following conditions are met:
-//  *
-//  * 1. Redistributions of source code must retain the above copyright notice, this
-//  * list of conditions and the following disclaimer.
-//  *
-//  * 2. Redistributions in binary form must reproduce the above copyright notice,
-//  * this list of conditions and the following disclaimer in the documentation
-//  * and/or other materials provided with the distribution.
-//  *
-//  * 3. Neither the name of the copyright holder nor the names of its contributors
-//  * may be used to endorse or promote products derived from this software without
-//  * specific prior written permission.
-//  *
-//  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-//  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-//  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-//  * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-//  * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-//  * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-//  * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-//  * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-//  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-//  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-//  * POSSIBILITY OF SUCH DAMAGE.
-//  *
-//  ****************************************************************************/
-
-/**
- * @brief Offboard control example
- * @file offboard_control.cpp
- * @addtogroup examples
- * @author Mickey Cowden <info@cowden.tech>
- * @author Nuno Marques <nuno.marques@dronesolutions.io>
- */
+// px4 msgs include
 #include <px4_msgs/msg/offboard_control_mode.hpp> // OffboardControlMode
 #include <px4_msgs/msg/trajectory_setpoint.hpp> // target position, velocity, acc
 #include <px4_msgs/msg/vehicle_command.hpp> // cmd like arm and disarm
 #include <px4_msgs/msg/vehicle_control_mode.hpp> 
+#include <px4_msgs/msg/vehicle_attitude_setpoint.hpp> // attitude setpoint
+#include <px4_msgs/msg/vehicle_rates_setpoint.hpp> // body rate setpoint
+
+// ros2 std lib include
 #include <rclcpp/rclcpp.hpp> // ROS2 C++ client library
 #include <stdint.h>
-
 #include <cfloat> // for DBL_MIN
 #include <chrono> // timing utilities
 #include <iostream>
+#include <rcl_interfaces/msg/set_parameters_result.hpp> // for setting parameters at runtime
 
+// pkg related include
 #include <gazebo_msgs/msg/link_states.hpp> // for gazebo link states
 #include <Eigen/Dense>
 #include "double_sls_qsf/common.h"
@@ -76,11 +43,18 @@ public:
 		finite_diff_enabled_ = this->declare_parameter<bool>("finite_diff_enabled_", true);
         drag_comp_enabled_ = this->declare_parameter<bool>("drag_comp_enabled_", false);
         ctrl_enabled_ = this->declare_parameter<bool>("ctrl_enabled_", false);
+        rate_ctrl_enabled_ = this->declare_parameter<bool>("rate_ctrl_enabled_", true);
+        mission_enabled_ = this->declare_parameter<bool>("mission_enabled_", false);
 
 		// Physical Parameters
 		mass_ = this->declare_parameter<double>("mass_", 1.56);
 		cable_length_ = this->declare_parameter<double>("cable_length_", 0.85);
     	load_mass_ = this->declare_parameter<double>("load_mass_", 0.25);
+
+        // Initial Positions
+        pos_x_0_ = this->declare_parameter<double>("pos_x_0_", 0.0);
+        pos_y_0_ = this->declare_parameter<double>("pos_y_0_", 0.0);
+        pos_z_0_ = this->declare_parameter<double>("pos_z_0_", 1.0);
 
 		// Controller Gains
 		Kpos_x_ = this->declare_parameter<double>("Kpos_x_", 10.0);
@@ -95,6 +69,17 @@ public:
 		Kjer_x_ = this->declare_parameter<double>("Kjer_x_", 0.0);
 		Kjer_y_ = this->declare_parameter<double>("Kjer_y_", 0.0);
 		Kjer_z_ = this->declare_parameter<double>("Kjer_z_", 0.0); 
+
+        // Mission Setpoints
+        c_x_1_ = this->declare_parameter<double>("c_x_1_", 0.0);
+        c_y_1_ = this->declare_parameter<double>("c_y_1_", 0.0);
+        c_z_1_ = this->declare_parameter<double>("c_z_1_", 1.0);
+        c_x_2_ = this->declare_parameter<double>("c_x_2_", 0.0);
+        c_y_2_ = this->declare_parameter<double>("c_y_2_", 0.0);
+        c_z_2_ = this->declare_parameter<double>("c_z_2_", 1.0);
+        c_x_3_ = this->declare_parameter<double>("c_x_3_", 0.0);
+        c_y_3_ = this->declare_parameter<double>("c_y_3_", 0.0);
+        c_z_3_ = this->declare_parameter<double>("c_z_3_", 1.0);
 
 		// Reference
 		c_x_ = this->declare_parameter<double>("c_x_", 0.0);
@@ -143,6 +128,8 @@ public:
 		offboard_control_mode_publisher_ = this->create_publisher<OffboardControlMode>("/fmu/in/offboard_control_mode", 10);
 		trajectory_setpoint_publisher_ = this->create_publisher<TrajectorySetpoint>("/fmu/in/trajectory_setpoint", 10);
 		vehicle_command_publisher_ = this->create_publisher<VehicleCommand>("/fmu/in/vehicle_command", 10);
+        attitude_setpoint_publisher_ = this->create_publisher<VehicleAttitudeSetpoint>("/fmu/in/vehicle_attitude_setpoint", 10); // for attitude control
+        rate_setpoint_publisher_ = this->create_publisher<VehicleRatesSetpoint>("/fmu/in/vehicle_rates_setpoint", 10); // for rate control
 
 		sls_state_raw_pub_ = this->create_publisher<SlsState> ("SLS_QSF_controller/sls_state_raw", 1);
 		sls_state_pub_ = this->create_publisher<SlsState> ("SLS_QSF_controller/sls_state", 1);
@@ -174,13 +161,12 @@ public:
 		RCLCPP_INFO(this->get_logger(),"Initialization Complete");
 		init_complete_ = true;
 		gazebo_last_called_ = this->get_clock()->now();
+        mission_last_called_ = this->get_clock()->now();
 
 		// main loop
 		auto timer_callback = [this]() -> void {
 			if (offboard_setpoint_counter_ == 10) {
-				// Change to Offboard mode after 10 setpoints
-				// https://discuss.px4.io/t/where-to-find-custom-mode-list-for-mav-cmd-do-set-mode/32756/10
-				this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6);
+				this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6); // enable offboard mode
 				this->arm();
 			}
 
@@ -191,6 +177,27 @@ public:
 				offboard_setpoint_counter_++;
 			}
 		};
+
+        // parameter callback
+        param_callback_handle_ = this->add_on_set_parameters_callback(
+            [this](const std::vector<rclcpp::Parameter> &params)
+            -> rcl_interfaces::msg::SetParametersResult
+            {
+              rcl_interfaces::msg::SetParametersResult result;
+              result.successful = true;
+              for (auto & param : params) {
+                if (param.get_name() == "rate_ctrl_enabled_") {
+                  rate_ctrl_enabled_ = param.as_bool();
+                  RCLCPP_INFO(this->get_logger(), "Param changed: rate_ctrl_enabled=%s", rate_ctrl_enabled_ ? "true" : "false");
+                } else if (param.get_name() == "mission_enabled_") {
+                  mission_enabled_ = param.as_bool();
+                  RCLCPP_INFO(this->get_logger(), "Param changed: mission_enabled=%s", mission_enabled_ ? "true" : "false");     
+                } else{} // add more parameters here   
+              }
+              return result;
+            }
+        );          
+          
 		timer_ = this->create_wall_timer(50ms, timer_callback); // 20Hz
 	}
 
@@ -205,6 +212,8 @@ private:
 	rclcpp::Publisher<SlsState>::SharedPtr sls_state_raw_pub_;
 	rclcpp::Publisher<SlsState>::SharedPtr sls_state_pub_;
 	rclcpp::Publisher<SlsForce>::SharedPtr sls_force_pub_;
+    rclcpp::Publisher<VehicleAttitudeSetpoint>::SharedPtr attitude_setpoint_publisher_; // for attitude control
+    rclcpp::Publisher<VehicleRatesSetpoint>::SharedPtr rate_setpoint_publisher_; // for rate control
 
 	// subscribers
 	rclcpp::Subscription<gazebo_msgs::msg::LinkStates>::SharedPtr gazebo_link_state_sub_;
@@ -214,9 +223,11 @@ private:
 	std::atomic<uint64_t> timestamp_;   // common synced timestamped
 	rclcpp::Time gazebo_last_called_;
 	rclcpp::Time traj_tracking_last_called_;
+    rclcpp::Time mission_last_called_;
 
     // shared pointers
     std::shared_ptr<Control> controller_;
+    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_; // for parameter callback
 
 	// LPFS
 	std::unique_ptr<SecondOrderFilter<Eigen::Vector3d>> load_vel_filter_;
@@ -227,15 +238,19 @@ private:
 	bool init_complete_;
 	bool lpf_enabled_ = false;
     bool drag_comp_enabled_ = false;
+    bool mission_enabled_ = false;
 	bool finite_diff_enabled_;
 	bool traj_tracking_enabled_, traj_tracking_enabled_last_;
     bool ctrl_enabled_;
+    bool rate_ctrl_enabled_; // flag for rate control
+    bool mission_initialized_ = false;
 
 	// ints
 	uint64_t offboard_setpoint_counter_;
 	int uav_num_ = 1; // number of drones
     int uav_id_ = 1; // id of the drone
 	int drone_link_index_;
+    int mission_stage_ = 0;
 
 	// doubles
 	double diff_t_; // time difference
@@ -248,6 +263,12 @@ private:
 	double fr_x_, fr_y_, fr_z_;
 	double ph_x_, ph_y_, ph_z_; // reference trajectory parameters
 
+    // mission setpoints
+    double c_x_1_, c_y_1_, c_z_1_;
+    double c_x_2_, c_y_2_, c_z_2_;
+    double c_x_3_, c_y_3_, c_z_3_;
+
+    double pos_x_0_, pos_y_0_, pos_z_0_;
     double mavYaw_; 
     double norm_thrust_const_, norm_thrust_offset_; // throttle normalization
     double attctrl_tau; // not defined in class in ros1 repo
@@ -299,6 +320,9 @@ private:
     Eigen::Vector3d transformPose(Eigen::Vector3d oldPose, Eigen::Vector3d offsetVector);
     Eigen::Vector4d acc2quaternion(const Eigen::Vector3d &vector_acc, const double &yaw);
     void computeBodyRateCmd(Eigen::Vector4d &bodyrate_cmd, const Eigen::Vector3d &a_des);
+    void pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude);
+    void updateReference();
+    void checkMissionStage(double mission_time_span);
 };
 
 
@@ -316,43 +340,28 @@ void SLSQSF::disarm()
 	RCLCPP_INFO(this->get_logger(), "Disarm command send");
 }
 
-/**
- * @brief Publish the offboard control mode.
- *        For this example, only position and altitude controls are active.
- */
 void SLSQSF::publish_offboard_control_mode()
 {
 	OffboardControlMode msg{}; // define a msg object of type OffboardControlMode
 	msg.position = true; // enable position control
 	msg.velocity = false;
 	msg.acceleration = false;
-	msg.attitude = false;
-	msg.body_rate = false;
+	msg.attitude = false; // enable attitude control
+	msg.body_rate = false; // enable body rate control
 	msg.timestamp = this->get_clock()->now().nanoseconds() / 1000; // get current time in microseconds
 	offboard_control_mode_publisher_->publish(msg);
 }
 
-/**
- * @brief Publish a trajectory setpoint
- *        For this example, it sends a trajectory setpoint to make the
- *        vehicle hover at 5 meters with a yaw angle of 180 degrees.
- */
 void SLSQSF::publish_trajectory_setpoint()
 {
 	// this part can be updated dynamically to some algorithm or even by a subscription callback for messages coming from another node
 	TrajectorySetpoint msg{};
-	msg.position = {0.0, 0.0, -5.0}; // NED frame, 5 meters above the ground
-	msg.yaw = -3.14; // [-PI:PI], euler angle of desired yaw
+	msg.position = {0.0, 0.0, -1.0}; 
+	msg.yaw = -3.14; 
 	msg.timestamp = this->get_clock()->now().nanoseconds() / 1000;
 	trajectory_setpoint_publisher_->publish(msg);
 }
 
-/**
- * @brief Publish vehicle commands
- * @param command   Command code (matches VehicleCommand and MAVLink MAV_CMD codes)
- * @param param1    Command parameter 1
- * @param param2    Command parameter 2
- */
 void SLSQSF::publish_vehicle_command(uint16_t command, float param1, float param2)
 {
 	VehicleCommand msg{};
@@ -424,9 +433,8 @@ void SLSQSF::gazeboLinkStateCb(const gazebo_msgs::msg::LinkStates::SharedPtr msg
     }
 }
 
-// in progress
 void SLSQSF::exeControl(void){
-    RCLCPP_INFO(this->get_logger(),"SLS Control EXE");
+    //RCLCPP_INFO(this->get_logger(),"SLS Control EXE");
     if(init_complete_){
         if(traj_tracking_enabled_ && !traj_tracking_enabled_last_) {
             traj_tracking_last_called_ = this->get_clock()->now();
@@ -437,38 +445,135 @@ void SLSQSF::exeControl(void){
         desired_acc = applyQuasiSlsCtrl();
         computeBodyRateCmd(cmdBodyRate_, desired_acc);
         if(ctrl_enabled_){
-           //pubRateCommands(cmdBodyRate_, q_des_);  // <- in progress
+           pubRateCommands(cmdBodyRate_, q_des_);  // <- in progress
         }
     //     else{
     //         // use px4's position controller
     //         pubTargetPose(pos_x_0_, pos_y_0_, pos_z_0_);
     //         debugRateCommands(cmdBodyRate_, q_des_); // same as pubRateCommands
     //     }
-    //     updateReference();
+        updateReference();
     }
 }
 
-// void mrotorCtrl::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude) {
-//     //copied from korean repo
-//     mavros_msgs::AttitudeTarget msg;
-//     msg.header.stamp = ros::Time::now();
-//     msg.header.frame_id = "map";
-//     msg.body_rate.x = cmd(0);
-//     msg.body_rate.y = cmd(1);
-//     msg.body_rate.z = cmd(2);
-//     if(rate_ctrl_enabled_){
-//         msg.type_mask = 128;  // Ignore orientation messages, only use body rate
-//     }
-//     else {
-//         msg.type_mask = 1|2|4; //ignore body rate, only use orientation
-//     }
-//     msg.orientation.w = target_attitude(0);
-//     msg.orientation.x = target_attitude(1);
-//     msg.orientation.y = target_attitude(2);
-//     msg.orientation.z = target_attitude(3);
-//     msg.thrust = cmd(3);
-//     target_attitude_pub_.publish(msg);
-// }
+void SLSQSF::updateReference(){
+    double t = this->get_clock()->now().seconds();
+    double sp_x = c_x_ + r_x_ * std::sin(fr_x_ * t + ph_x_);
+    double sp_y = c_y_ + r_y_ * std::sin(fr_y_ * t + ph_y_);
+    double sp_z = c_z_ + r_z_ * std::sin(fr_z_ * t + ph_z_);
+    double sp_x_dt = r_x_ * fr_x_ * std::cos(fr_x_ * t + ph_x_);
+    double sp_y_dt = r_y_ * fr_y_ * std::cos(fr_y_ * t + ph_y_);
+    double sp_z_dt = r_z_ * fr_z_ * std::cos(fr_z_ * t + ph_z_);
+
+    if(mission_enabled_){
+        switch(mission_stage_){
+            case 0:
+                if(!mission_initialized_){
+                    RCLCPP_INFO(this->get_logger(),"[exeMission] Mission started at case 0");
+                    mission_initialized_ = true;
+                }
+                targetPos_ << c_x_, c_y_, c_z_; 
+                targetRadium_ << 0, 0, 0;
+                targetFrequency_ << 0, 0, 0;
+                targetPhase_ << 0, 0, 0;
+                checkMissionStage(10);
+                break;
+            case 1:
+                targetPos_ << c_x_1_, c_y_1_, c_z_1_; 
+                targetRadium_ << 0, 0, 0;
+                targetFrequency_ << 0, 0, 0;
+                targetPhase_ << 0, 0, 0;
+                checkMissionStage(10);
+                break;
+            case 2:
+                targetPos_ << c_x_2_, c_y_2_, c_z_2_; 
+                targetRadium_ << 0, 0, 0;
+                targetFrequency_ << 0, 0, 0;
+                targetPhase_ << 0, 0, 0;
+                checkMissionStage(10);
+                break;
+            case 3:
+                targetPos_ << c_x_3_, c_y_3_, c_z_3_; 
+                targetRadium_ << 0, 0, 0;
+                targetFrequency_ << 0, 0, 0;
+                targetPhase_ << 0, 0, 0;
+                checkMissionStage(10);
+                break;
+            case 4:
+                targetPos_ << c_x_, c_y_, c_z_; 
+                targetRadium_ << 0, 0, 0;
+                targetFrequency_ << 0, 0, 0;
+                targetPhase_ << 0, 0, 0;
+                checkMissionStage(10);
+                break;
+            case 5:
+                targetPos_ << c_x_, c_y_, c_z_; 
+                targetRadium_ << r_x_, r_y_, r_z_;
+                targetFrequency_ << fr_x_, fr_y_, fr_z_;
+                targetPhase_ << ph_x_, ph_y_, ph_z_; 
+                traj_tracking_enabled_ = true; // just a flag for circular trajectory
+                checkMissionStage(20);
+                break;
+            default:
+                targetPos_ << pos_x_0_, pos_y_0_, pos_z_0_; 
+                targetRadium_ << 0, 0, 0;
+                targetFrequency_ << 0, 0, 0;
+                targetPhase_ << 0, 0, 0;
+                traj_tracking_enabled_ = false;
+                if(this->get_clock()->now().seconds() - mission_last_called_.seconds() >= 10){
+                    RCLCPP_INFO(this->get_logger(),"[exeMission] Mission Accomplished");
+                    mission_last_called_ = this->get_clock()->now();
+                    mission_initialized_ = false;
+                }
+        }
+    }
+    else {
+        mission_last_called_ = this->get_clock()->now();
+        if(mission_stage_ == 5) {
+            traj_tracking_enabled_ = false;
+        }
+        mission_stage_ = 0;
+        mission_initialized_ = false;
+        targetPos_ << c_x_, c_y_, c_z_; 
+        targetRadium_ << r_x_, r_y_, r_z_;
+        targetFrequency_ << fr_x_, fr_y_, fr_z_;
+        targetPhase_ << ph_x_, ph_y_, ph_z_;
+    }
+}
+
+void SLSQSF::checkMissionStage(double mission_time_span) {
+    if(this->get_clock()->now().seconds() - mission_last_called_.seconds() >= mission_time_span) {
+        mission_last_called_ = this->get_clock()->now();
+        mission_stage_ += 1;
+        RCLCPP_INFO(this->get_logger(),"[exeMission] Stage %d ended, switching to stage %d", mission_stage_ - 1, mission_stage_);
+    }
+}
+
+void SLSQSF::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude) {
+    // ros2 equivalent
+    if(rate_ctrl_enabled_){
+        VehicleRatesSetpoint msg;
+        msg.timestamp = this->get_clock()->now().nanoseconds() / 1000; // get current time in microseconds
+        msg.roll = cmd(0);
+        msg.pitch = cmd(1);
+        msg.yaw = cmd(2);
+        msg.thrust_body[0] = 0.0f;
+        msg.thrust_body[1] = 0.0f;
+        msg.thrust_body[2] = cmd(3);
+        rate_setpoint_publisher_ -> publish(msg);
+    } else {
+        VehicleAttitudeSetpoint msg;
+        msg.timestamp = this->get_clock()->now().nanoseconds() / 1000; // get current time in microseconds
+        msg.q_d[0] = target_attitude(0);
+        msg.q_d[1] = target_attitude(1);
+        msg.q_d[2] = target_attitude(2);
+        msg.q_d[3] = target_attitude(3);
+        msg.thrust_body[0] = 0.0f;
+        msg.thrust_body[1] = 0.0f;
+        msg.thrust_body[2] = cmd(3);
+        attitude_setpoint_publisher_ -> publish(msg);
+    }
+}
 
 void SLSQSF::computeBodyRateCmd(Eigen::Vector4d &bodyrate_cmd, const Eigen::Vector3d &a_des) {
     q_des_ = acc2quaternion(a_des, mavYaw_);
@@ -525,7 +630,6 @@ Eigen::Vector3d SLSQSF::applyQuasiSlsCtrl(){
     } 
 
     a_des = a_fb - a_rd - gravity_;
-    RCLCPP_INFO(this->get_logger(),"a_des: %f, %f, %f", a_des(0), a_des(1), a_des(2));
     
     return a_des;
 }

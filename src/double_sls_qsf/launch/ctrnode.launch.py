@@ -15,6 +15,8 @@ def generate_launch_description():
                 'traj_tracking_enabled_': False,
                 'drag_comp_enabled_': True,
                 'ctrl_enabled_': True,
+                'rate_ctrl_enabled_': True,
+                'mission_enabled_': False,
                 'Kpos_x_':24.0,
                 'Kpos_y_':24.0,
                 'Kpos_z_':2.0,
@@ -49,6 +51,18 @@ def generate_launch_description():
                 'norm_thrust_const_':0.034436,
                 'norm_thrust_offset_':0.14344,
                 'attctrl_tau_':0.1,
+                'c_x_1_':0.0,
+                'c_y_1_':0.0,
+                'c_z_1_':1.0,
+                'c_x_2_':1.5,
+                'c_y_2_':0.0,
+                'c_z_2_':1.0,
+                'c_x_3_':0.0,
+                'c_y_3_':1.5,
+                'c_z_3_':1.0,
+                'pos_x_0_':0.0,
+                'pos_y_0_':0.0,
+                'pos_z_0_':1.0,
             }]
         )
     ])
