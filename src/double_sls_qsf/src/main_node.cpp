@@ -32,6 +32,11 @@ using namespace std::placeholders;
 
 #define FD_EPSILON DBL_MIN
 
+enum class ControllerPhase {
+    WAIT_FOR_TAKEOFF,
+    SLS_ENABLED
+};
+
 class SLSQSF : public rclcpp::Node
 {
 public:
@@ -96,7 +101,7 @@ public:
 		ph_z_ = this->declare_parameter<double>("ph_z_", 0.0); 
 
         // drone physical parameters
-        max_fb_acc_ = this->declare_parameter<double>("max_fb_acc_", 9.0);
+        max_fb_acc_ = this->declare_parameter<double>("max_fb_acc_", 9.0); //9.0
 
         // drone Yaw
         mavYaw_ = this->declare_parameter<double>("mavYaw_", 0.0);
@@ -164,19 +169,77 @@ public:
         mission_last_called_ = this->get_clock()->now();
 
 		// main loop
-		auto timer_callback = [this]() -> void {
-			if (offboard_setpoint_counter_ == 10) {
-				this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6); // enable offboard mode
-				this->arm();
-			}
+		// auto timer_callback = [this]() -> void {
+		// 	if (offboard_setpoint_counter_ == 10) {
+		// 		this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6); // enable offboard mode
+		// 		this->arm();
+		// 	}
 
-			publish_offboard_control_mode();
-			publish_trajectory_setpoint();
+		// 	publish_offboard_control_mode();
+		// 	publish_trajectory_setpoint();
 
-			if (offboard_setpoint_counter_ < 11) {
-				offboard_setpoint_counter_++;
-			}
-		};
+		// 	if (offboard_setpoint_counter_ < 11) {
+		// 		offboard_setpoint_counter_++;
+		// 	}
+		// };
+        auto timer_callback = [this]() -> void {
+            switch (phase_) {
+            case ControllerPhase::WAIT_FOR_TAKEOFF:
+            {
+                // 1) Publish offboard mode (position or velocity or whatever),
+                //    plus a simple setpoint to hover at 1m.
+                //    So the UAV can do a normal takeoff or just hold position
+                OffboardControlMode mode_msg{};
+                mode_msg.position     = true;  
+                mode_msg.velocity     = false;
+                mode_msg.acceleration = false;
+                mode_msg.attitude     = false;
+                mode_msg.body_rate    = false;
+                mode_msg.timestamp = this->get_clock()->now().nanoseconds() / 1000ULL;
+                offboard_control_mode_publisher_->publish(mode_msg);
+        
+                // A setpoint at 1 meter above ground (if ENU: +1)
+                publish_trajectory_setpoint();  
+        
+                // 2) Arm after some setpoints
+                if (offboard_setpoint_counter_ == 10) {
+                    publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6); // OFFBOARD
+                    arm();  // sets is_armed_ = true in your code
+                    armed_time_ = this->get_clock()->now(); // store the time we armed
+                }
+                if (offboard_setpoint_counter_ < 11) {
+                    offboard_setpoint_counter_++;
+                }
+        
+                // 3) Once we are armed, wait 5 seconds
+                if (is_armed_) {
+                    auto now = this->get_clock()->now();
+                    double elapsed = (now - armed_time_).seconds();
+                    if (elapsed > 15.0) {
+                        RCLCPP_INFO(this->get_logger(), "15s after arming, switching to SLS");
+                        phase_ = ControllerPhase::SLS_ENABLED;
+                    }
+                }
+                break;
+            }
+        
+            case ControllerPhase::SLS_ENABLED:
+            {
+                // Switch to body_rate offboard mode
+                OffboardControlMode mode_msg{};
+                mode_msg.position     = false;
+                mode_msg.velocity     = false;
+                mode_msg.acceleration = false;
+                mode_msg.attitude     = false;
+                mode_msg.body_rate    = true;
+                mode_msg.timestamp = this->get_clock()->now().nanoseconds() / 1000ULL;
+                offboard_control_mode_publisher_->publish(mode_msg);
+                bool test = true;
+                
+                break;
+            }
+            }
+        };
 
         // parameter callback
         param_callback_handle_ = this->add_on_set_parameters_callback(
@@ -225,6 +288,12 @@ private:
 	rclcpp::Time traj_tracking_last_called_;
     rclcpp::Time mission_last_called_;
 
+    // takeoff related
+    ControllerPhase phase_ = ControllerPhase::WAIT_FOR_TAKEOFF;
+    rclcpp::Time armed_time_;   // to store when we armed
+    bool is_armed_ = false;     // track if we’re armed
+    bool test = false;
+
     // shared pointers
     std::shared_ptr<Control> controller_;
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_callback_handle_; // for parameter callback
@@ -251,7 +320,7 @@ private:
     int uav_id_ = 1; // id of the drone
 	int drone_link_index_;
     int mission_stage_ = 0;
-
+    
 	// doubles
 	double diff_t_; // time difference
 	double Kpos_x_, Kpos_y_, Kpos_z_, Kvel_x_, Kvel_y_, Kvel_z_, Kacc_x_, Kacc_y_, Kacc_z_, Kjer_x_, Kjer_y_, Kjer_z_; // controller gains
@@ -325,12 +394,12 @@ private:
     void checkMissionStage(double mission_time_span);
 };
 
-
 void SLSQSF::arm()
 {
 	publish_vehicle_command(VehicleCommand::VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0);
-
 	RCLCPP_INFO(this->get_logger(), "Arm command send");
+    is_armed_ = true;
+    armed_time_ = this->get_clock()->now(); // store the time
 }
 
 void SLSQSF::disarm()
@@ -434,26 +503,26 @@ void SLSQSF::gazeboLinkStateCb(const gazebo_msgs::msg::LinkStates::SharedPtr msg
 }
 
 void SLSQSF::exeControl(void){
-    //RCLCPP_INFO(this->get_logger(),"SLS Control EXE");
-    if(init_complete_){
-        if(traj_tracking_enabled_ && !traj_tracking_enabled_last_) {
-            traj_tracking_last_called_ = this->get_clock()->now();
-        }
-        traj_tracking_enabled_last_ = traj_tracking_enabled_;
+        //RCLCPP_INFO(this->get_logger(),"SLS Control EXE");
+        if(init_complete_ && test){
+            if(traj_tracking_enabled_ && !traj_tracking_enabled_last_) {
+                traj_tracking_last_called_ = this->get_clock()->now();
+            }
+            traj_tracking_enabled_last_ = traj_tracking_enabled_;
 
-        Eigen::Vector3d desired_acc;
-        desired_acc = applyQuasiSlsCtrl();
-        computeBodyRateCmd(cmdBodyRate_, desired_acc);
-        if(ctrl_enabled_){
-           pubRateCommands(cmdBodyRate_, q_des_);  // <- in progress
+            Eigen::Vector3d desired_acc;
+            desired_acc = applyQuasiSlsCtrl();
+            computeBodyRateCmd(cmdBodyRate_, desired_acc);
+            if(ctrl_enabled_){
+                pubRateCommands(cmdBodyRate_, q_des_); 
+            }
+        //     else{
+        //         // use px4's position controller
+        //         pubTargetPose(pos_x_0_, pos_y_0_, pos_z_0_);
+        //         debugRateCommands(cmdBodyRate_, q_des_); // same as pubRateCommands
+        //     }
+            updateReference();
         }
-    //     else{
-    //         // use px4's position controller
-    //         pubTargetPose(pos_x_0_, pos_y_0_, pos_z_0_);
-    //         debugRateCommands(cmdBodyRate_, q_des_); // same as pubRateCommands
-    //     }
-        updateReference();
-    }
 }
 
 void SLSQSF::updateReference(){
@@ -570,7 +639,7 @@ void SLSQSF::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &
         msg.q_d[3] = target_attitude(3);
         msg.thrust_body[0] = 0.0f;
         msg.thrust_body[1] = 0.0f;
-        msg.thrust_body[2] = cmd(3);
+        msg.thrust_body[2] = cmd(3); 
         attitude_setpoint_publisher_ -> publish(msg);
     }
 }

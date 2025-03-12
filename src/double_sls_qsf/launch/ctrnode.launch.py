@@ -15,7 +15,7 @@ def generate_launch_description():
                 'traj_tracking_enabled_': False,
                 'drag_comp_enabled_': True,
                 'ctrl_enabled_': True,
-                'rate_ctrl_enabled_': True,
+                'rate_ctrl_enabled_': True, #True
                 'mission_enabled_': False,
                 'Kpos_x_':24.0,
                 'Kpos_y_':24.0,
@@ -34,9 +34,9 @@ def generate_launch_description():
                 'load_mass_':0.25,
                 'c_x':0.0,
                 'c_y':0.0,
-                'c_z':1.0,
-                'r_x':1.0,
-                'r_y':1.0,
+                'c_z':1.0, #1.0
+                'r_x':1.0, #1.0
+                'r_y':1.0, #1.0
                 'r_z':0.0,
                 'fr_x':1.0,
                 'fr_y':1.0,
@@ -62,7 +62,7 @@ def generate_launch_description():
                 'c_z_3_':1.0,
                 'pos_x_0_':0.0,
                 'pos_y_0_':0.0,
-                'pos_z_0_':1.0,
+                'pos_z_0_':1.0, #1.0
             }]
         )
     ])
