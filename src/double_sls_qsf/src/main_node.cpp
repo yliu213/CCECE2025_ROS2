@@ -140,6 +140,9 @@ public:
 		sls_state_pub_ = this->create_publisher<SlsState> ("SLS_QSF_controller/sls_state", 1);
 		sls_force_pub_ = this->create_publisher<SlsForce> ("SLS_QSF_controller/sls_force", 1);
 
+        // debug publisher
+        rate_setpoint_debug_publisher_ = this->create_publisher<VehicleRatesSetpoint>("/SLS_QSF_controller/debug_ratesp", 10);
+
 		// subscribers
 		gazebo_link_state_sub_ = this->create_subscription<gazebo_msgs::msg::LinkStates>("/gazebo/link_states",1000,std::bind(&SLSQSF::gazeboLinkStateCb, this, _1));
 
@@ -227,14 +230,14 @@ public:
             {
                 // Switch to body_rate offboard mode
                 OffboardControlMode mode_msg{};
-                mode_msg.position     = false;
+                mode_msg.position     = !(this-> ctrl_enabled_);
                 mode_msg.velocity     = false;
                 mode_msg.acceleration = false;
                 mode_msg.attitude     = false;
-                mode_msg.body_rate    = true;
+                mode_msg.body_rate    = this-> ctrl_enabled_;
                 mode_msg.timestamp = this->get_clock()->now().nanoseconds() / 1000ULL;
                 offboard_control_mode_publisher_->publish(mode_msg);
-                bool test = true;
+                this-> test = true;
                 
                 break;
             }
@@ -277,6 +280,7 @@ private:
 	rclcpp::Publisher<SlsForce>::SharedPtr sls_force_pub_;
     rclcpp::Publisher<VehicleAttitudeSetpoint>::SharedPtr attitude_setpoint_publisher_; // for attitude control
     rclcpp::Publisher<VehicleRatesSetpoint>::SharedPtr rate_setpoint_publisher_; // for rate control
+    rclcpp::Publisher<VehicleRatesSetpoint>::SharedPtr rate_setpoint_debug_publisher_; // for debug
 
 	// subscribers
 	rclcpp::Subscription<gazebo_msgs::msg::LinkStates>::SharedPtr gazebo_link_state_sub_;
@@ -392,6 +396,7 @@ private:
     void pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude);
     void updateReference();
     void checkMissionStage(double mission_time_span);
+    void debugRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude);
 };
 
 void SLSQSF::arm()
@@ -504,7 +509,7 @@ void SLSQSF::gazeboLinkStateCb(const gazebo_msgs::msg::LinkStates::SharedPtr msg
 
 void SLSQSF::exeControl(void){
         //RCLCPP_INFO(this->get_logger(),"SLS Control EXE");
-        if(init_complete_ && test){
+        if(init_complete_ && this->test){
             if(traj_tracking_enabled_ && !traj_tracking_enabled_last_) {
                 traj_tracking_last_called_ = this->get_clock()->now();
             }
@@ -516,11 +521,10 @@ void SLSQSF::exeControl(void){
             if(ctrl_enabled_){
                 pubRateCommands(cmdBodyRate_, q_des_); 
             }
-        //     else{
-        //         // use px4's position controller
-        //         pubTargetPose(pos_x_0_, pos_y_0_, pos_z_0_);
-        //         debugRateCommands(cmdBodyRate_, q_des_); // same as pubRateCommands
-        //     }
+            else{
+                publish_trajectory_setpoint(); // px4 default control
+                debugRateCommands(cmdBodyRate_, q_des_);
+            }
             updateReference();
         }
 }
@@ -626,9 +630,12 @@ void SLSQSF::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &
         msg.roll = cmd(0);
         msg.pitch = cmd(1);
         msg.yaw = cmd(2);
-        msg.thrust_body[0] = 0.0f;
-        msg.thrust_body[1] = 0.0f;
-        msg.thrust_body[2] = cmd(3);
+        // msg.roll = cmd(1);
+        // msg.pitch = cmd(0);
+        // msg.yaw = -cmd(2);
+        // msg.thrust_body[0] = 0;
+        // msg.thrust_body[1] = 0;
+        msg.thrust_body[2] = cmd(3); 
         rate_setpoint_publisher_ -> publish(msg);
     } else {
         VehicleAttitudeSetpoint msg;
@@ -637,10 +644,36 @@ void SLSQSF::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &
         msg.q_d[1] = target_attitude(1);
         msg.q_d[2] = target_attitude(2);
         msg.q_d[3] = target_attitude(3);
-        msg.thrust_body[0] = 0.0f;
-        msg.thrust_body[1] = 0.0f;
+        msg.thrust_body[0] = 0;
+        msg.thrust_body[1] = 0;
         msg.thrust_body[2] = cmd(3); 
         attitude_setpoint_publisher_ -> publish(msg);
+    }
+}
+
+void SLSQSF::debugRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude) {
+    // ros2 equivalent
+    if(rate_ctrl_enabled_){
+        VehicleRatesSetpoint msg;
+        msg.timestamp = this->get_clock()->now().nanoseconds() / 1000; // get current time in microseconds
+        msg.roll = cmd(0);
+        msg.pitch = cmd(1);
+        msg.yaw = cmd(2);
+        msg.thrust_body[0] = 0;
+        msg.thrust_body[1] = 0;
+        msg.thrust_body[2] = cmd(3); 
+        rate_setpoint_debug_publisher_ -> publish(msg);
+    } else {
+        // VehicleAttitudeSetpoint msg;
+        // msg.timestamp = this->get_clock()->now().nanoseconds() / 1000; // get current time in microseconds
+        // msg.q_d[0] = target_attitude(0);
+        // msg.q_d[1] = target_attitude(1);
+        // msg.q_d[2] = target_attitude(2);
+        // msg.q_d[3] = target_attitude(3);
+        // msg.thrust_body[0] = 0;
+        // msg.thrust_body[1] = 0;
+        // msg.thrust_body[2] = cmd(3); 
+        // attitude_setpoint_publisher_ -> publish(msg);
     }
 }
 
@@ -650,16 +683,21 @@ void SLSQSF::computeBodyRateCmd(Eigen::Vector4d &bodyrate_cmd, const Eigen::Vect
     bodyrate_cmd.head(3) = controller_->getDesiredRate();
     double thrust_command = controller_->getDesiredThrust().z();
     bodyrate_cmd(3) = std::max(0.0, std::min(1.0, norm_thrust_const_ * thrust_command + norm_thrust_offset_));  
+    
+    // NED
+    // double thrust_command_ned = controller_->getDesiredThrust().z(); 
+    // double thrust_for_px4 = -thrust_command_ned; 
+    // bodyrate_cmd(3) = std::clamp(norm_thrust_const_ * thrust_for_px4 + norm_thrust_offset_, 0.0, 1.0);
 }
 
 Eigen::Vector3d SLSQSF::applyQuasiSlsCtrl(){
     double target_force_ned[3];
     double K[10] = {Kpos_x_, Kvel_x_, Kacc_x_, Kjer_x_, Kpos_y_, Kvel_y_, Kacc_y_, Kjer_y_, Kpos_z_, Kvel_z_};
-    double param[4] = {load_mass_, mass_, cable_length_, gravity_acc_}; // some physical parameters
+    double param[4] = {load_mass_, mass_, cable_length_, gravity_acc_}; 
     double ref[12] = {
         targetRadium_(1), targetFrequency_(1), targetPos_(1), targetPhase_(1), 
-        targetRadium_(0), targetFrequency_(0), targetPos_(0), targetPhase_(0), // convert to NED
-        targetRadium_(2), targetFrequency_(2), -targetPos_(2), targetPhase_(2)}; // reference trajectory parameters
+        targetRadium_(0), targetFrequency_(0), targetPos_(0), targetPhase_(0), // convert to NED for the controller
+        targetRadium_(2), targetFrequency_(2), -targetPos_(2), targetPhase_(2)}; 
     if(!traj_tracking_enabled_) {
         for(int i=0; i<12; i++){
             if((i+2)%4!=0) ref[i]=0; // set all ref to 0 except for the position
@@ -682,7 +720,11 @@ Eigen::Vector3d SLSQSF::applyQuasiSlsCtrl(){
     Eigen::Vector3d a_des;
     a_des(0) = target_force_ned[1] / mass_;
     a_des(1) = target_force_ned[0] / mass_;
-    a_des(2) = -target_force_ned[2] / mass_;
+    a_des(2) = -target_force_ned[2] / mass_; // seems back to ENU for a_des
+
+    // a_des(0) = target_force_ned[0] / mass_;
+    // a_des(1) = target_force_ned[1] / mass_;
+    // a_des(2) = target_force_ned[2] / mass_;  // still in NED for a_des
 
     Eigen::Vector3d a_fb = a_des + gravity_;
 
@@ -758,8 +800,25 @@ Eigen::Vector4d SLSQSF::acc2quaternion(const Eigen::Vector3d &vector_acc, const 
     yb_des = zb_des.cross(proj_xb_des) / (zb_des.cross(proj_xb_des)).norm();
     xb_des = yb_des.cross(zb_des) / (yb_des.cross(zb_des)).norm();
 
+    // NED
+    // zb_des = - vector_acc / vector_acc.norm();
+    // yb_des = zb_des.cross(proj_xb_des) / (zb_des.cross(proj_xb_des)).norm();
+    // xb_des = yb_des.cross(zb_des) / (yb_des.cross(zb_des)).norm();
+
     rotmat << xb_des(0), yb_des(0), zb_des(0), xb_des(1), yb_des(1), zb_des(1), xb_des(2), yb_des(2), zb_des(2);
     quat = rot2Quaternion(rotmat);
+
+    // RCLCPP_INFO(get_logger(),
+    //   "acc2quat: accel=[%.3f, %.3f, %.3f], yaw=%.3f => zb_des=[%.3f, %.3f, %.3f]",
+    //   vector_acc.x(), vector_acc.y(), vector_acc.z(), yaw,
+    //   zb_des.x(), zb_des.y(), zb_des.z()
+    // );
+    // // after computing rotmat -> quaternion
+    // RCLCPP_INFO(get_logger(),
+    //   "rotmat => quat= [%.3f, %.3f, %.3f, %.3f]",
+    //   quat(0), quat(1), quat(2), quat(3)
+    // );
+
     return quat;
 }
 
@@ -800,7 +859,7 @@ void SLSQSF::applyLowPassFilterFiniteDiff(void) {
             sls_state_raw_.sls_state[2] = -loadPos_(2);
             sls_state_raw_.sls_state[3] = pendAngle_(1);
             sls_state_raw_.sls_state[4] = pendAngle_(0);
-            sls_state_raw_.sls_state[5] = -pendAngle_(2);
+            sls_state_raw_.sls_state[5] = -pendAngle_(2); // store value in NED frame
             if(diff_t_ > FD_EPSILON) {
                 // >>> mavVel
                 Vel_ = (Pos_ - Pos_prev_) / diff_t_;
@@ -813,7 +872,7 @@ void SLSQSF::applyLowPassFilterFiniteDiff(void) {
                 loadVel_ = (loadPos_ - loadPos_prev_) / diff_t_;
                 sls_state_raw_.sls_state[6] = loadVel_(1);
                 sls_state_raw_.sls_state[7] = loadVel_(0);
-                sls_state_raw_.sls_state[8] = -loadVel_(2); 
+                sls_state_raw_.sls_state[8] = -loadVel_(2); // store value in NED frame
                 loadVel_ = load_vel_filter_ -> updateFilter(loadVel_, diff_t_);
                 // >>> loadAcc
                 loadAcc_ = (loadVel_ - loadVel_prev_) / diff_t_;

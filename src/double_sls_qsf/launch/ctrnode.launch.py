@@ -13,9 +13,9 @@ def generate_launch_description():
                 'lpf_enabled_': True,
                 'finite_diff_enabled_': True,
                 'traj_tracking_enabled_': False,
-                'drag_comp_enabled_': True,
-                'ctrl_enabled_': True,
-                'rate_ctrl_enabled_': True, #True
+                'drag_comp_enabled_': True, # True
+                'ctrl_enabled_': True, # True
+                'rate_ctrl_enabled_': True, # True
                 'mission_enabled_': False,
                 'Kpos_x_':24.0,
                 'Kpos_y_':24.0,
