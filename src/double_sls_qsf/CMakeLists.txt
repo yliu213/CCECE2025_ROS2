@@ -10,6 +10,7 @@ find_package(gazebo_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(controller_msgs REQUIRED)
+find_package(px4_ros_com REQUIRED)
 
 #################
 # Setup targets #
@@ -32,17 +33,18 @@ ament_target_dependencies(sls_qsf
   gazebo_msgs 
   geometry_msgs 
   controller_msgs
+  px4_ros_com
 )
 
 # Make sure Eigen's include path is used
 target_include_directories(sls_qsf PUBLIC 
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${EIGEN3_INCLUDE_DIRS}
+  ${px4_ros_com_INCLUDE_DIRS}  # Add PX4 frame transforms
 )
 
 # find executables
 install(TARGETS sls_qsf DESTINATION lib/${PROJECT_NAME})
-
 
 ############
 # Install ##

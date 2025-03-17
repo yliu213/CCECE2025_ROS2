@@ -5,6 +5,8 @@
 #include <px4_msgs/msg/vehicle_control_mode.hpp> 
 #include <px4_msgs/msg/vehicle_attitude_setpoint.hpp> // attitude setpoint
 #include <px4_msgs/msg/vehicle_rates_setpoint.hpp> // body rate setpoint
+#include <px4_msgs/msg/vehicle_thrust_setpoint.hpp> // thrust setpoint
+#include "px4_ros_com/frame_transforms.h" // for frame transforms
 
 // ros2 std lib include
 #include <rclcpp/rclcpp.hpp> // ROS2 C++ client library
@@ -135,13 +137,15 @@ public:
 		vehicle_command_publisher_ = this->create_publisher<VehicleCommand>("/fmu/in/vehicle_command", 10);
         attitude_setpoint_publisher_ = this->create_publisher<VehicleAttitudeSetpoint>("/fmu/in/vehicle_attitude_setpoint", 10); // for attitude control
         rate_setpoint_publisher_ = this->create_publisher<VehicleRatesSetpoint>("/fmu/in/vehicle_rates_setpoint", 10); // for rate control
+        //thrust_setpoint_publisher_ = this->create_publisher<VehicleThrustSetpoint>("/fmu/in/vehicle_thrust_setpoint", 10); // for thrust control
 
 		sls_state_raw_pub_ = this->create_publisher<SlsState> ("SLS_QSF_controller/sls_state_raw", 1);
 		sls_state_pub_ = this->create_publisher<SlsState> ("SLS_QSF_controller/sls_state", 1);
 		sls_force_pub_ = this->create_publisher<SlsForce> ("SLS_QSF_controller/sls_force", 1);
 
         // debug publisher
-        rate_setpoint_debug_publisher_ = this->create_publisher<VehicleRatesSetpoint>("/SLS_QSF_controller/debug_ratesp", 10);
+        rate_setpoint_debug_publisher_ = this->create_publisher<VehicleRatesSetpoint>("/SLS_QSF_controller/debug_rate_sp", 10);
+        attitude_setpoint_debug_publisher_ = this->create_publisher<VehicleAttitudeSetpoint>("/SLS_QSF_controller/debug_att_sp", 10);
 
 		// subscribers
 		gazebo_link_state_sub_ = this->create_subscription<gazebo_msgs::msg::LinkStates>("/gazebo/link_states",1000,std::bind(&SLSQSF::gazeboLinkStateCb, this, _1));
@@ -172,60 +176,41 @@ public:
         mission_last_called_ = this->get_clock()->now();
 
 		// main loop
-		// auto timer_callback = [this]() -> void {
-		// 	if (offboard_setpoint_counter_ == 10) {
-		// 		this->publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6); // enable offboard mode
-		// 		this->arm();
-		// 	}
-
-		// 	publish_offboard_control_mode();
-		// 	publish_trajectory_setpoint();
-
-		// 	if (offboard_setpoint_counter_ < 11) {
-		// 		offboard_setpoint_counter_++;
-		// 	}
-		// };
         auto timer_callback = [this]() -> void {
             switch (phase_) {
             case ControllerPhase::WAIT_FOR_TAKEOFF:
             {
-                // 1) Publish offboard mode (position or velocity or whatever),
-                //    plus a simple setpoint to hover at 1m.
-                //    So the UAV can do a normal takeoff or just hold position
                 OffboardControlMode mode_msg{};
                 mode_msg.position     = true;  
                 mode_msg.velocity     = false;
                 mode_msg.acceleration = false;
                 mode_msg.attitude     = false;
                 mode_msg.body_rate    = false;
-                mode_msg.timestamp = this->get_clock()->now().nanoseconds() / 1000ULL;
+                mode_msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
                 offboard_control_mode_publisher_->publish(mode_msg);
         
-                // A setpoint at 1 meter above ground (if ENU: +1)
                 publish_trajectory_setpoint();  
         
-                // 2) Arm after some setpoints
                 if (offboard_setpoint_counter_ == 10) {
                     publish_vehicle_command(VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6); // OFFBOARD
-                    arm();  // sets is_armed_ = true in your code
-                    armed_time_ = this->get_clock()->now(); // store the time we armed
+                    arm();  
+                    armed_time_ = this->get_clock()->now(); 
                 }
                 if (offboard_setpoint_counter_ < 11) {
                     offboard_setpoint_counter_++;
                 }
         
-                // 3) Once we are armed, wait 5 seconds
                 if (is_armed_) {
                     auto now = this->get_clock()->now();
                     double elapsed = (now - armed_time_).seconds();
-                    if (elapsed > 15.0) {
-                        RCLCPP_INFO(this->get_logger(), "15s after arming, switching to SLS");
+                    if (elapsed > 7.0) {
+                        RCLCPP_INFO(this->get_logger(), "7s after arming, switching to SLS controller");
                         phase_ = ControllerPhase::SLS_ENABLED;
                     }
                 }
                 break;
             }
-        
+
             case ControllerPhase::SLS_ENABLED:
             {
                 // Switch to body_rate offboard mode
@@ -233,9 +218,10 @@ public:
                 mode_msg.position     = !(this-> ctrl_enabled_);
                 mode_msg.velocity     = false;
                 mode_msg.acceleration = false;
-                mode_msg.attitude     = false;
-                mode_msg.body_rate    = this-> ctrl_enabled_;
-                mode_msg.timestamp = this->get_clock()->now().nanoseconds() / 1000ULL;
+                mode_msg.attitude     = (this-> ctrl_enabled_) && (!(this-> rate_ctrl_enabled_));
+                mode_msg.body_rate    = (this-> ctrl_enabled_) && (this-> rate_ctrl_enabled_);
+                //mode_msg.thrust_and_torque = true;
+                mode_msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
                 offboard_control_mode_publisher_->publish(mode_msg);
                 this-> test = true;
                 
@@ -245,6 +231,7 @@ public:
         };
 
         // parameter callback
+        // this is needed to change the parameters at runtime using rqt_reconfigure
         param_callback_handle_ = this->add_on_set_parameters_callback(
             [this](const std::vector<rclcpp::Parameter> &params)
             -> rcl_interfaces::msg::SetParametersResult
@@ -258,7 +245,13 @@ public:
                 } else if (param.get_name() == "mission_enabled_") {
                   mission_enabled_ = param.as_bool();
                   RCLCPP_INFO(this->get_logger(), "Param changed: mission_enabled=%s", mission_enabled_ ? "true" : "false");     
-                } else{} // add more parameters here   
+                } else if (param.get_name() == "ctrl_enabled_"){
+                  ctrl_enabled_ = param.as_bool();
+                  RCLCPP_INFO(this->get_logger(), "Param changed: ctrl_enabled=%s", ctrl_enabled_ ? "true" : "false");
+                } else if (param.get_name() == "traj_tracking_enabled_"){
+                  traj_tracking_enabled_ = param.as_bool();
+                  RCLCPP_INFO(this->get_logger(), "Param changed: traj_tracking_enabled_=%s", traj_tracking_enabled_ ? "true" : "false");
+                } else{}
               }
               return result;
             }
@@ -281,6 +274,8 @@ private:
     rclcpp::Publisher<VehicleAttitudeSetpoint>::SharedPtr attitude_setpoint_publisher_; // for attitude control
     rclcpp::Publisher<VehicleRatesSetpoint>::SharedPtr rate_setpoint_publisher_; // for rate control
     rclcpp::Publisher<VehicleRatesSetpoint>::SharedPtr rate_setpoint_debug_publisher_; // for debug
+    rclcpp::Publisher<VehicleAttitudeSetpoint>::SharedPtr attitude_setpoint_debug_publisher_; // for debug
+    //rclcpp::Publisher<VehicleThrustSetpoint>::SharedPtr thrust_setpoint_publisher_; // for thrust control
 
 	// subscribers
 	rclcpp::Subscription<gazebo_msgs::msg::LinkStates>::SharedPtr gazebo_link_state_sub_;
@@ -422,7 +417,7 @@ void SLSQSF::publish_offboard_control_mode()
 	msg.acceleration = false;
 	msg.attitude = false; // enable attitude control
 	msg.body_rate = false; // enable body rate control
-	msg.timestamp = this->get_clock()->now().nanoseconds() / 1000; // get current time in microseconds
+	msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
 	offboard_control_mode_publisher_->publish(msg);
 }
 
@@ -430,9 +425,12 @@ void SLSQSF::publish_trajectory_setpoint()
 {
 	// this part can be updated dynamically to some algorithm or even by a subscription callback for messages coming from another node
 	TrajectorySetpoint msg{};
-	msg.position = {0.0, 0.0, -1.0}; 
-	msg.yaw = -3.14; 
-	msg.timestamp = this->get_clock()->now().nanoseconds() / 1000;
+	//msg.position = {0.0, -1.0, -1.0}; // gazebo: x:-1, y:0, z:1
+    //msg.position = {-1.0, 0.0, -1.0}; // gazebo: x:0, y:-1, z:1
+    msg.position = {0.0, 0.0, -1.0};
+	// msg.yaw = 3.14159265358979323846/2; 
+    msg.yaw = 0.0; 
+	msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
 	trajectory_setpoint_publisher_->publish(msg);
 }
 
@@ -447,7 +445,7 @@ void SLSQSF::publish_vehicle_command(uint16_t command, float param1, float param
 	msg.source_system = 1;
 	msg.source_component = 1;
 	msg.from_external = true; // command from ros2, not
-	msg.timestamp = this->get_clock()->now().nanoseconds() / 1000;
+	msg.timestamp = this->get_clock()->now().seconds();
 	vehicle_command_publisher_->publish(msg);
 }
 
@@ -499,7 +497,7 @@ void SLSQSF::gazeboLinkStateCb(const gazebo_msgs::msg::LinkStates::SharedPtr msg
         pendRate_ = pendAngle_.cross(loadVel_ - Vel_);
 
         // since cmdloop never used, so remove the if()
-    	diff_t_ = (this->get_clock()->now() - gazebo_last_called_).seconds();
+    	diff_t_ = this->get_clock()->now().seconds() - gazebo_last_called_.seconds();
         gazebo_last_called_ = this->get_clock()->now();
 
         applyLowPassFilterFiniteDiff();
@@ -509,7 +507,7 @@ void SLSQSF::gazeboLinkStateCb(const gazebo_msgs::msg::LinkStates::SharedPtr msg
 
 void SLSQSF::exeControl(void){
         //RCLCPP_INFO(this->get_logger(),"SLS Control EXE");
-        if(init_complete_ && this->test){
+        if(init_complete_){
             if(traj_tracking_enabled_ && !traj_tracking_enabled_last_) {
                 traj_tracking_last_called_ = this->get_clock()->now();
             }
@@ -518,7 +516,7 @@ void SLSQSF::exeControl(void){
             Eigen::Vector3d desired_acc;
             desired_acc = applyQuasiSlsCtrl();
             computeBodyRateCmd(cmdBodyRate_, desired_acc);
-            if(ctrl_enabled_){
+            if(ctrl_enabled_ && this-> test){
                 pubRateCommands(cmdBodyRate_, q_des_); 
             }
             else{
@@ -584,7 +582,7 @@ void SLSQSF::updateReference(){
                 targetRadium_ << r_x_, r_y_, r_z_;
                 targetFrequency_ << fr_x_, fr_y_, fr_z_;
                 targetPhase_ << ph_x_, ph_y_, ph_z_; 
-                traj_tracking_enabled_ = true; // just a flag for circular trajectory
+                this->traj_tracking_enabled_ = true; 
                 checkMissionStage(20);
                 break;
             default:
@@ -592,18 +590,18 @@ void SLSQSF::updateReference(){
                 targetRadium_ << 0, 0, 0;
                 targetFrequency_ << 0, 0, 0;
                 targetPhase_ << 0, 0, 0;
-                traj_tracking_enabled_ = false;
+                this->traj_tracking_enabled_ = false;
                 if(this->get_clock()->now().seconds() - mission_last_called_.seconds() >= 10){
                     RCLCPP_INFO(this->get_logger(),"[exeMission] Mission Accomplished");
                     mission_last_called_ = this->get_clock()->now();
-                    mission_initialized_ = false;
+                    this->mission_initialized_ = false;
                 }
         }
     }
     else {
         mission_last_called_ = this->get_clock()->now();
         if(mission_stage_ == 5) {
-            traj_tracking_enabled_ = false;
+            this->traj_tracking_enabled_ = false;
         }
         mission_stage_ = 0;
         mission_initialized_ = false;
@@ -626,27 +624,28 @@ void SLSQSF::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &
     // ros2 equivalent
     if(rate_ctrl_enabled_){
         VehicleRatesSetpoint msg;
-        msg.timestamp = this->get_clock()->now().nanoseconds() / 1000; // get current time in microseconds
-        msg.roll = cmd(0);
-        msg.pitch = cmd(1);
-        msg.yaw = cmd(2);
-        // msg.roll = cmd(1);
-        // msg.pitch = cmd(0);
-        // msg.yaw = -cmd(2);
-        // msg.thrust_body[0] = 0;
-        // msg.thrust_body[1] = 0;
-        msg.thrust_body[2] = cmd(3); 
+        msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
+        msg.roll = static_cast<float>(cmd(0));
+        msg.pitch = static_cast<float>(cmd(1));
+        msg.yaw = static_cast<float>(cmd(2));
+        msg.thrust_body[0] = 0.0f;
+        msg.thrust_body[1] = 0.0f;
+        msg.thrust_body[2] = static_cast<float>(-cmd(3)); 
         rate_setpoint_publisher_ -> publish(msg);
     } else {
         VehicleAttitudeSetpoint msg;
-        msg.timestamp = this->get_clock()->now().nanoseconds() / 1000; // get current time in microseconds
-        msg.q_d[0] = target_attitude(0);
-        msg.q_d[1] = target_attitude(1);
-        msg.q_d[2] = target_attitude(2);
-        msg.q_d[3] = target_attitude(3);
-        msg.thrust_body[0] = 0;
-        msg.thrust_body[1] = 0;
-        msg.thrust_body[2] = cmd(3); 
+        msg.timestamp = this->get_clock()->now().nanoseconds()/1000; 
+        // transform from ENU
+        Eigen::Quaterniond target_att_enu(target_attitude(0), target_attitude(1), target_attitude(2), target_attitude(3));
+        Eigen::Quaterniond target_att_ned = px4_ros_com::frame_transforms::ros_to_px4_orientation(target_att_enu);
+        msg.q_d[0] = static_cast<float>(target_att_ned.w());
+        msg.q_d[1] = static_cast<float>(target_att_ned.x());
+        msg.q_d[2] = static_cast<float>(target_att_ned.y());
+        msg.q_d[3] = static_cast<float>(target_att_ned.z());
+
+        msg.thrust_body[0] = 0.0f;
+        msg.thrust_body[1] = 0.0f;
+        msg.thrust_body[2] = static_cast<float>(-cmd(3));
         attitude_setpoint_publisher_ -> publish(msg);
     }
 }
@@ -655,25 +654,25 @@ void SLSQSF::debugRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d
     // ros2 equivalent
     if(rate_ctrl_enabled_){
         VehicleRatesSetpoint msg;
-        msg.timestamp = this->get_clock()->now().nanoseconds() / 1000; // get current time in microseconds
-        msg.roll = cmd(0);
-        msg.pitch = cmd(1);
-        msg.yaw = cmd(2);
-        msg.thrust_body[0] = 0;
-        msg.thrust_body[1] = 0;
-        msg.thrust_body[2] = cmd(3); 
+        msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
+        msg.roll = static_cast<float>(cmd(0));
+        msg.pitch = static_cast<float>(cmd(1));
+        msg.yaw = static_cast<float>(cmd(2));
+        msg.thrust_body[0] = 0.0f;
+        msg.thrust_body[1] = 0.0f;
+        msg.thrust_body[2] = static_cast<float>(-cmd(3)); 
         rate_setpoint_debug_publisher_ -> publish(msg);
     } else {
-        // VehicleAttitudeSetpoint msg;
-        // msg.timestamp = this->get_clock()->now().nanoseconds() / 1000; // get current time in microseconds
-        // msg.q_d[0] = target_attitude(0);
-        // msg.q_d[1] = target_attitude(1);
-        // msg.q_d[2] = target_attitude(2);
-        // msg.q_d[3] = target_attitude(3);
-        // msg.thrust_body[0] = 0;
-        // msg.thrust_body[1] = 0;
-        // msg.thrust_body[2] = cmd(3); 
-        // attitude_setpoint_publisher_ -> publish(msg);
+        VehicleAttitudeSetpoint msg;
+        msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
+        msg.q_d[0] = static_cast<float>(target_attitude(0)); // w
+        msg.q_d[1] = static_cast<float>(target_attitude(1)); // x
+        msg.q_d[2] = static_cast<float>(target_attitude(2)); // y
+        msg.q_d[3] = static_cast<float>(target_attitude(3)); // z
+        msg.thrust_body[0] = 0.0f;
+        msg.thrust_body[1] = 0.0f;
+        msg.thrust_body[2] = cmd(3); 
+        attitude_setpoint_debug_publisher_ -> publish(msg);
     }
 }
 
@@ -682,12 +681,7 @@ void SLSQSF::computeBodyRateCmd(Eigen::Vector4d &bodyrate_cmd, const Eigen::Vect
     controller_ -> Update(Att_, q_des_, a_des, targetJerk_); 
     bodyrate_cmd.head(3) = controller_->getDesiredRate();
     double thrust_command = controller_->getDesiredThrust().z();
-    bodyrate_cmd(3) = std::max(0.0, std::min(1.0, norm_thrust_const_ * thrust_command + norm_thrust_offset_));  
-    
-    // NED
-    // double thrust_command_ned = controller_->getDesiredThrust().z(); 
-    // double thrust_for_px4 = -thrust_command_ned; 
-    // bodyrate_cmd(3) = std::clamp(norm_thrust_const_ * thrust_for_px4 + norm_thrust_offset_, 0.0, 1.0);
+    bodyrate_cmd(3) = std::max(0.0, std::min(1.0, norm_thrust_const_ * thrust_command + norm_thrust_offset_));  // original, seems normalized to 0-1
 }
 
 Eigen::Vector3d SLSQSF::applyQuasiSlsCtrl(){
@@ -740,9 +734,21 @@ Eigen::Vector3d SLSQSF::applyQuasiSlsCtrl(){
         a_rd = Eigen::Vector3d::Zero();
     } 
 
-    a_des = a_fb - a_rd - gravity_;
+    a_des = a_fb - a_rd - gravity_; // seems from (31)
     
-    return a_des;
+    // to NED
+    // Eigen::Vector3d a_des_ned;
+    // a_des_ned(0) = a_des(1);
+    // a_des_ned(1) = a_des(0);
+    // a_des_ned(2) = -a_des(2);
+    // return a_des_ned;
+
+    // this seems to work, but wrong
+    // a_des(1) = a_des(0);
+    // a_des(0) = a_des(1);
+    // a_des(2) = -a_des(2);
+
+    return a_des; 
 }
 
 Eigen::Vector3d SLSQSF::compensateRotorDrag(double t) {
@@ -788,36 +794,25 @@ Eigen::Vector3d SLSQSF::compensateRotorDrag(double t) {
 }
 
 Eigen::Vector4d SLSQSF::acc2quaternion(const Eigen::Vector3d &vector_acc, const double &yaw) {
-    // convert acceleration vector to quaternion
     // copied from korean repo
     Eigen::Vector4d quat;
-    Eigen::Vector3d zb_des, yb_des, xb_des, proj_xb_des;
+    Eigen::Vector3d zb_des, yb_des, xb_des, proj_xb_des, proj_yb_des;
     Eigen::Matrix3d rotmat;
 
-    proj_xb_des << std::cos(yaw), std::sin(yaw), 0.0;
-
-    zb_des = vector_acc / vector_acc.norm();
-    yb_des = zb_des.cross(proj_xb_des) / (zb_des.cross(proj_xb_des)).norm();
-    xb_des = yb_des.cross(zb_des) / (yb_des.cross(zb_des)).norm();
+    // ENU
+    proj_xb_des << std::cos(yaw), std::sin(yaw), 0.0; // (9)
+    zb_des = vector_acc / vector_acc.norm(); // (33)
+    yb_des = zb_des.cross(proj_xb_des) / (zb_des.cross(proj_xb_des)).norm(); // (34)
+    xb_des = yb_des.cross(zb_des) / (yb_des.cross(zb_des)).norm(); // (35)
 
     // NED
-    // zb_des = - vector_acc / vector_acc.norm();
-    // yb_des = zb_des.cross(proj_xb_des) / (zb_des.cross(proj_xb_des)).norm();
-    // xb_des = yb_des.cross(zb_des) / (yb_des.cross(zb_des)).norm();
+    // proj_yb_des << -std::sin(yaw), std::cos(yaw), 0.0; 
+    // zb_des = -vector_acc / vector_acc.norm(); 
+    // xb_des = zb_des.cross(proj_yb_des) / (zb_des.cross(proj_yb_des)).norm(); 
+    // yb_des = xb_des.cross(zb_des) / (xb_des.cross(zb_des)).norm(); 
 
     rotmat << xb_des(0), yb_des(0), zb_des(0), xb_des(1), yb_des(1), zb_des(1), xb_des(2), yb_des(2), zb_des(2);
     quat = rot2Quaternion(rotmat);
-
-    // RCLCPP_INFO(get_logger(),
-    //   "acc2quat: accel=[%.3f, %.3f, %.3f], yaw=%.3f => zb_des=[%.3f, %.3f, %.3f]",
-    //   vector_acc.x(), vector_acc.y(), vector_acc.z(), yaw,
-    //   zb_des.x(), zb_des.y(), zb_des.z()
-    // );
-    // // after computing rotmat -> quaternion
-    // RCLCPP_INFO(get_logger(),
-    //   "rotmat => quat= [%.3f, %.3f, %.3f, %.3f]",
-    //   quat(0), quat(1), quat(2), quat(3)
-    // );
 
     return quat;
 }

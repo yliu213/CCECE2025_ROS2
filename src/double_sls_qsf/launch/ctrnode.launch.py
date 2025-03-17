@@ -15,8 +15,9 @@ def generate_launch_description():
                 'traj_tracking_enabled_': False,
                 'drag_comp_enabled_': True, # True
                 'ctrl_enabled_': True, # True
-                'rate_ctrl_enabled_': True, # True
+                'rate_ctrl_enabled_': False, # True
                 'mission_enabled_': False,
+                'mavYaw_': 0.0, # 0.0
                 'Kpos_x_':24.0,
                 'Kpos_y_':24.0,
                 'Kpos_z_':2.0,
@@ -32,18 +33,18 @@ def generate_launch_description():
                 'mass_':1.56,
                 'cable_length_':0.85,
                 'load_mass_':0.25,
-                'c_x':0.0,
-                'c_y':0.0,
-                'c_z':1.0, #1.0
-                'r_x':1.0, #1.0
-                'r_y':1.0, #1.0
-                'r_z':0.0,
-                'fr_x':1.0,
-                'fr_y':1.0,
-                'fr_z':0.0,
-                'ph_x':1.57,
-                'ph_y':0.0,
-                'ph_z':0.0,
+                'c_x_':0.0,
+                'c_y_':0.0,
+                'c_z_':1.0, #1.0
+                'r_x_':1.0, #1.0
+                'r_y_':1.0, #1.0
+                'r_z_':0.0,
+                'fr_x_':1.0,
+                'fr_y_':1.0,
+                'fr_z_':0.0,
+                'ph_x_':1.57,
+                'ph_y_':0.0,
+                'ph_z_':0.0,
                 'max_fb_acc_': 20.0,
                 'rotorDragD_x_':1.25,
                 'rotorDragD_y_':1.25,
