@@ -210,7 +210,6 @@ public:
                 }
                 break;
             }
-
             case ControllerPhase::SLS_ENABLED:
             {
                 // Switch to body_rate offboard mode
@@ -224,7 +223,6 @@ public:
                 mode_msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
                 offboard_control_mode_publisher_->publish(mode_msg);
                 this-> test = true;
-                
                 break;
             }
             }
@@ -251,12 +249,132 @@ public:
                 } else if (param.get_name() == "traj_tracking_enabled_"){
                   traj_tracking_enabled_ = param.as_bool();
                   RCLCPP_INFO(this->get_logger(), "Param changed: traj_tracking_enabled_=%s", traj_tracking_enabled_ ? "true" : "false");
-                } else{}
+                } else if (param.get_name() == "traj_tracking_enabled_"){
+                    traj_tracking_enabled_ = param.as_bool();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: traj_tracking_enabled_=%s", traj_tracking_enabled_ ? "true" : "false");
+                } else if (param.get_name() == "drag_comp_enabled_"){
+                    drag_comp_enabled_ = param.as_bool();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: drag_comp_enabled_=%s", drag_comp_enabled_ ? "true" : "false");
+                } else if (param.get_name() == "lpf_enabled_"){
+                    lpf_enabled_ = param.as_bool();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: lpf_enabled_=%s", lpf_enabled_ ? "true" : "false");
+                } else if (param.get_name() == "Kpos_x_"){
+                    Kpos_x_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kpos_x_=%f", Kpos_x_);
+                } else if (param.get_name() == "Kpos_y_"){
+                    Kpos_y_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kpos_y_=%f", Kpos_y_);
+                } else if (param.get_name() == "Kpos_z_"){
+                    Kpos_z_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kpos_z_=%f", Kpos_z_);
+                } else if (param.get_name() == "Kvel_x_"){
+                    Kvel_x_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kvel_x_=%f", Kvel_x_);
+                } else if (param.get_name() == "Kvel_y_"){
+                    Kvel_y_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kvel_y_=%f", Kvel_y_);
+                } else if (param.get_name() == "Kvel_z_"){
+                    Kvel_z_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kvel_z_=%f", Kvel_z_);
+                } else if (param.get_name() == "Kacc_x_"){
+                    Kacc_x_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kacc_x_=%f", Kacc_x_);
+                } else if (param.get_name() == "Kacc_y_"){
+                    Kacc_y_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kacc_y_=%f", Kacc_y_);
+                } else if (param.get_name() == "Kacc_z_"){
+                    Kacc_z_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kacc_z_=%f", Kacc_z_);
+                } else if (param.get_name() == "Kjer_x_"){
+                    Kjer_x_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kjer_x_=%f", Kjer_x_);
+                } else if (param.get_name() == "Kjer_y_"){
+                    Kjer_y_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kjer_y_=%f", Kjer_y_);
+                } else if (param.get_name() == "Kjer_z_"){
+                    Kjer_z_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: Kjer_z_=%f", Kjer_z_);
+                } else if (param.get_name() == "c_x_"){
+                    c_x_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_x_=%f", c_x_);
+                } else if (param.get_name() == "c_y_"){
+                    c_y_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_y_=%f", c_y_);
+                } else if (param.get_name() == "c_z_"){
+                    c_z_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_z_=%f", c_z_);
+                } else if (param.get_name() == "r_x_"){
+                    r_x_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: r_x_=%f", r_x_);
+                } else if (param.get_name() == "r_y_"){
+                    r_y_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: r_y_=%f", r_y_);
+                } else if (param.get_name() == "r_z_"){
+                    r_z_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: r_z_=%f", r_z_);
+                } else if (param.get_name() == "fr_x_"){
+                    fr_x_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: fr_x_=%f", fr_x_);
+                } else if (param.get_name() == "fr_y_z"){
+                    fr_y_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: fr_y_=%f", fr_y_);
+                } else if (param.get_name() == "fr_z_"){
+                    fr_z_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: fr_z_=%f", fr_z_);
+                } else if (param.get_name() == "ph_x_"){
+                    ph_x_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: ph_x_=%f", ph_x_);
+                } else if (param.get_name() == "ph_y_"){
+                    ph_y_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: ph_y_=%f", ph_y_);
+                } else if (param.get_name() == "ph_z_"){
+                    ph_z_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: ph_z_=%f", ph_z_);
+                } else if (param.get_name() == "c_x_1_"){
+                    c_x_1_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_x_1_=%f", c_x_1_);
+                } else if (param.get_name() == "c_y_1_"){
+                    c_y_1_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_y_1_=%f", c_y_1_);
+                } else if (param.get_name() == "c_z_1_"){
+                    c_z_1_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_z_1_=%f", c_z_1_);
+                } else if (param.get_name() == "c_x_2_"){
+                    c_x_2_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_x_2_=%f", c_x_2_);
+                } else if (param.get_name() == "c_y_2_"){
+                    c_y_2_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_y_2_=%f", c_y_2_);
+                } else if (param.get_name() == "c_z_2_"){
+                    c_z_2_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_z_2_=%f", c_z_2_);
+                } else if (param.get_name() == "c_x_3_"){
+                    c_x_3_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_x_3_=%f", c_x_3_);
+                } else if (param.get_name() == "c_y_3_"){
+                    c_y_3_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_y_3_=%f", c_y_3_);
+                } else if (param.get_name() == "c_z_3_"){
+                    c_z_3_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: c_z_3_=%f", c_z_3_);
+                } else if (param.get_name() == "rotorDragD_x_" ){
+                    rotorDragD_x_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: rotorDragD_x_=%f", rotorDragD_x_);
+                } else if (param.get_name() == "rotorDragD_y_" ){
+                    rotorDragD_y_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: rotorDragD_y_=%f", rotorDragD_y_);
+                } else if (param.get_name() == "rotorDragD_z_" ){
+                    rotorDragD_z_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: rotorDragD_z_=%f", rotorDragD_z_);
+                } else {
+                    result.successful = false;
+                }
+                Kpos_ << -Kpos_x_, -Kpos_y_, -Kpos_z_;
+                Kvel_ << -Kvel_x_, -Kvel_y_, -Kvel_z_;  
               }
               return result;
             }
         );          
-          
 		timer_ = this->create_wall_timer(50ms, timer_callback); // 20Hz
 	}
 

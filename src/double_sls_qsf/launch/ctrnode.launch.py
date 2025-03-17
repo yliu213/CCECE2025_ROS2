@@ -35,9 +35,9 @@ def generate_launch_description():
                 'load_mass_':0.25,
                 'c_x_':0.0,
                 'c_y_':0.0,
-                'c_z_':1.0, #1.0
-                'r_x_':1.0, #1.0
-                'r_y_':1.0, #1.0
+                'c_z_':1.0, 
+                'r_x_':1.0, 
+                'r_y_':1.0, 
                 'r_z_':0.0,
                 'fr_x_':1.0,
                 'fr_y_':1.0,
@@ -63,7 +63,7 @@ def generate_launch_description():
                 'c_z_3_':1.0,
                 'pos_x_0_':0.0,
                 'pos_y_0_':0.0,
-                'pos_z_0_':1.0, #1.0
+                'pos_z_0_':1.0, 
             }]
         )
     ])
