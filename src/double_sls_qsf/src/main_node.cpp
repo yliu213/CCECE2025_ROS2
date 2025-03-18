@@ -700,7 +700,7 @@ void SLSQSF::updateReference(){
                 targetRadium_ << r_x_, r_y_, r_z_;
                 targetFrequency_ << fr_x_, fr_y_, fr_z_;
                 targetPhase_ << ph_x_, ph_y_, ph_z_; 
-                this->traj_tracking_enabled_ = true; 
+                traj_tracking_enabled_ = true; 
                 checkMissionStage(20);
                 break;
             default:
@@ -708,18 +708,18 @@ void SLSQSF::updateReference(){
                 targetRadium_ << 0, 0, 0;
                 targetFrequency_ << 0, 0, 0;
                 targetPhase_ << 0, 0, 0;
-                this->traj_tracking_enabled_ = false;
+                traj_tracking_enabled_ = false;
                 if(this->get_clock()->now().seconds() - mission_last_called_.seconds() >= 10){
                     RCLCPP_INFO(this->get_logger(),"[exeMission] Mission Accomplished");
                     mission_last_called_ = this->get_clock()->now();
-                    this->mission_initialized_ = false;
+                    mission_initialized_ = false;
                 }
         }
     }
     else {
         mission_last_called_ = this->get_clock()->now();
         if(mission_stage_ == 5) {
-            this->traj_tracking_enabled_ = false;
+            traj_tracking_enabled_ = false;
         }
         mission_stage_ = 0;
         mission_initialized_ = false;
@@ -739,13 +739,16 @@ void SLSQSF::checkMissionStage(double mission_time_span) {
 }
 
 void SLSQSF::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude) {
-    // ros2 equivalent
     if(rate_ctrl_enabled_){
         VehicleRatesSetpoint msg;
         msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
-        msg.roll = static_cast<float>(cmd(0));
-        msg.pitch = static_cast<float>(cmd(1));
-        msg.yaw = static_cast<float>(cmd(2));
+        // Convert FLU (ROS2 body) to FRD (px4 body) frame
+        // baselink frame = FLU for ROS2, aircraft frame = FRD for px4
+        Eigen::Vector3d body_rate_flu(cmd(0), cmd(1), cmd(2));  
+        Eigen::Vector3d body_rate_frd = px4_ros_com::frame_transforms::baselink_to_aircraft_body_frame(body_rate_flu);
+        msg.roll  = static_cast<float>(body_rate_frd(0));
+        msg.pitch = static_cast<float>(body_rate_frd(1));
+        msg.yaw   = static_cast<float>(body_rate_frd(2));
         msg.thrust_body[0] = 0.0f;
         msg.thrust_body[1] = 0.0f;
         msg.thrust_body[2] = static_cast<float>(-cmd(3)); 
@@ -753,14 +756,13 @@ void SLSQSF::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &
     } else {
         VehicleAttitudeSetpoint msg;
         msg.timestamp = this->get_clock()->now().nanoseconds()/1000; 
-        // transform from ENU
+        // transform from ENU to NED
         Eigen::Quaterniond target_att_enu(target_attitude(0), target_attitude(1), target_attitude(2), target_attitude(3));
         Eigen::Quaterniond target_att_ned = px4_ros_com::frame_transforms::ros_to_px4_orientation(target_att_enu);
         msg.q_d[0] = static_cast<float>(target_att_ned.w());
         msg.q_d[1] = static_cast<float>(target_att_ned.x());
         msg.q_d[2] = static_cast<float>(target_att_ned.y());
         msg.q_d[3] = static_cast<float>(target_att_ned.z());
-
         msg.thrust_body[0] = 0.0f;
         msg.thrust_body[1] = 0.0f;
         msg.thrust_body[2] = static_cast<float>(-cmd(3));

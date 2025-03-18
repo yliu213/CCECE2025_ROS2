@@ -15,12 +15,12 @@ def generate_launch_description():
                 'traj_tracking_enabled_': False,
                 'drag_comp_enabled_': True, # True
                 'ctrl_enabled_': True, # True
-                'rate_ctrl_enabled_': False, # True
+                'rate_ctrl_enabled_': True, # True
                 'mission_enabled_': False,
                 'mavYaw_': 0.0, # 0.0
                 'Kpos_x_':24.0,
                 'Kpos_y_':24.0,
-                'Kpos_z_':2.0,
+                'Kpos_z_':2.5, # 2.0; 2.5 for att_sp
                 'Kvel_x_':50.0,
                 'Kvel_y_':50.0,
                 'Kvel_z_':3.0,
