@@ -2,7 +2,6 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    # Return the LaunchDescription with the arguments & parameters
     return LaunchDescription([
         Node(
             package='double_sls_qsf', 
@@ -10,8 +9,8 @@ def generate_launch_description():
             name='sls_qsf_controller',
             output='screen',
             parameters=[{
-                'lpf_enabled_': True,
-                'finite_diff_enabled_': True,
+                'lpf_enabled_': False, # True
+                'finite_diff_enabled_': True, # True
                 'traj_tracking_enabled_': False,
                 'drag_comp_enabled_': True, # True
                 'ctrl_enabled_': True, # True
@@ -20,22 +19,22 @@ def generate_launch_description():
                 'mavYaw_': 0.0, # 0.0
                 'Kpos_x_':24.0,
                 'Kpos_y_':24.0,
-                'Kpos_z_':2.5, # 2.0; 2.5 for att_sp
+                'Kpos_z_':48.0, # 2.0; 10.0(test); 40.0(1); 48.0(2)
                 'Kvel_x_':50.0,
                 'Kvel_y_':50.0,
-                'Kvel_z_':3.0,
+                'Kvel_z_':4.0, # 3.0; 3.0(test); 4.0(1); 4.0(2)
                 'Kacc_x_':35.0,
                 'Kacc_y_':35.0,
                 'Kacc_z_':0.0,
                 'Kjer_x_':10.0,
                 'Kjer_y_':10.0,
                 'Kjer_z_':0.0,
-                'mass_':1.56,
+                'mass_':1.56, #1.56
                 'cable_length_':0.85,
                 'load_mass_':0.25,
                 'c_x_':0.0,
                 'c_y_':0.0,
-                'c_z_':1.0, 
+                'c_z_':1.0, # 1.0
                 'r_x_':1.0, 
                 'r_y_':1.0, 
                 'r_z_':0.0,
@@ -49,8 +48,8 @@ def generate_launch_description():
                 'rotorDragD_x_':1.25,
                 'rotorDragD_y_':1.25,
                 'rotorDragD_z_':0.0,
-                'norm_thrust_const_':0.034436,
-                'norm_thrust_offset_':0.14344,
+                'norm_thrust_const_': 0.186, # 0.034436; 0.0627(test); 0.2125(1); 0.186(2)
+                'norm_thrust_offset_': -1.6687, # 0.14344; -0.346(test); -2.0134(1); -1.6687(2)
                 'attctrl_tau_':0.1,
                 'c_x_1_':0.0,
                 'c_y_1_':0.0,

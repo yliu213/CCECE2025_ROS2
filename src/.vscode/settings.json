@@ -67,6 +67,7 @@
         "typeindex": "cpp",
         "typeinfo": "cpp",
         "core": "cpp",
-        "regex": "cpp"
+        "regex": "cpp",
+        "*.ipp": "cpp"
     }
 }

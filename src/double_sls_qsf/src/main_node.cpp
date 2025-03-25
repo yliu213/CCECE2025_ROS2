@@ -135,8 +135,8 @@ public:
 		offboard_control_mode_publisher_ = this->create_publisher<OffboardControlMode>("/fmu/in/offboard_control_mode", 10);
 		trajectory_setpoint_publisher_ = this->create_publisher<TrajectorySetpoint>("/fmu/in/trajectory_setpoint", 10);
 		vehicle_command_publisher_ = this->create_publisher<VehicleCommand>("/fmu/in/vehicle_command", 10);
-        attitude_setpoint_publisher_ = this->create_publisher<VehicleAttitudeSetpoint>("/fmu/in/vehicle_attitude_setpoint", 10); // for attitude control
-        rate_setpoint_publisher_ = this->create_publisher<VehicleRatesSetpoint>("/fmu/in/vehicle_rates_setpoint", 10); // for rate control
+        attitude_setpoint_publisher_ = this->create_publisher<VehicleAttitudeSetpoint>("/fmu/in/vehicle_attitude_setpoint", 10); 
+        rate_setpoint_publisher_ = this->create_publisher<VehicleRatesSetpoint>("/fmu/in/vehicle_rates_setpoint", 10); 
         //thrust_setpoint_publisher_ = this->create_publisher<VehicleThrustSetpoint>("/fmu/in/vehicle_thrust_setpoint", 10); // for thrust control
 
 		sls_state_raw_pub_ = this->create_publisher<SlsState> ("SLS_QSF_controller/sls_state_raw", 1);
@@ -203,8 +203,8 @@ public:
                 if (is_armed_) {
                     auto now = this->get_clock()->now();
                     double elapsed = (now - armed_time_).seconds();
-                    if (elapsed > 7.0) {
-                        RCLCPP_INFO(this->get_logger(), "7s after arming, switching to SLS controller");
+                    if (elapsed > 9.0) {
+                        RCLCPP_INFO(this->get_logger(), "9s after arming, switching to SLS controller");
                         phase_ = ControllerPhase::SLS_ENABLED;
                     }
                 }
@@ -366,6 +366,12 @@ public:
                 } else if (param.get_name() == "rotorDragD_z_" ){
                     rotorDragD_z_ = param.as_double();
                     RCLCPP_INFO(this->get_logger(), "Param changed: rotorDragD_z_=%f", rotorDragD_z_);
+                } else if (param.get_name() == "norm_thrust_const_" ){
+                    norm_thrust_const_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: norm_thrust_const_=%f", norm_thrust_const_);
+                } else if (param.get_name() == "norm_thrust_offset_" ){
+                    norm_thrust_offset_ = param.as_double();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: norm_thrust_offset_=%f", norm_thrust_offset_);
                 } else {
                     result.successful = false;
                 }
@@ -603,7 +609,8 @@ void SLSQSF::gazeboLinkStateCb(const gazebo_msgs::msg::LinkStates::SharedPtr msg
         Att_(2) = msg -> pose[drone_link_index_].orientation.y;
         Att_(3) = msg -> pose[drone_link_index_].orientation.z;    // orientation in quaternion form
         // Load 
-        loadPos_ = toEigen(msg -> pose[10].position);  
+        loadPos_ = toEigen(msg -> pose[10].position);
+        //RCLCPP_INFO(this->get_logger(), "loadPos_=%f, %f, %f", loadPos_(0), loadPos_(1), loadPos_(2));  
         // Pendulum
         pendAngle_ = loadPos_ - Pos_;
         pendAngle_ = pendAngle_ / pendAngle_.norm();
@@ -802,6 +809,8 @@ void SLSQSF::computeBodyRateCmd(Eigen::Vector4d &bodyrate_cmd, const Eigen::Vect
     bodyrate_cmd.head(3) = controller_->getDesiredRate();
     double thrust_command = controller_->getDesiredThrust().z();
     bodyrate_cmd(3) = std::max(0.0, std::min(1.0, norm_thrust_const_ * thrust_command + norm_thrust_offset_));  // original, seems normalized to 0-1
+    //bodyrate_cmd(3) = std::max(0.0, std::min(1.0, 15.103*thrust_command*thrust_command - 341.92*thrust_command + 1935.9)); //polynominal
+    //RCLCPP_INFO(this->get_logger(), "Thrust command: %f", thrust_command); // for motor curve
 }
 
 Eigen::Vector3d SLSQSF::applyQuasiSlsCtrl(){
@@ -823,6 +832,10 @@ Eigen::Vector3d SLSQSF::applyQuasiSlsCtrl(){
        sls_state_array[i] = sls_state_.sls_state[i]; 
     }
     const double t = this->get_clock()->now().seconds() - traj_tracking_last_called_.seconds(); 
+
+    // double error = -targetPos_(2) - (-loadPos_(2));
+    // RCLCPP_INFO(this->get_logger(), "t=%f", error);
+
     QSFGeometricController(sls_state_array, K, param, ref, t, target_force_ned);
 
     sls_force_.header.stamp = this->get_clock()->now();
