@@ -551,7 +551,7 @@ void SLSQSF::publish_trajectory_setpoint()
 	TrajectorySetpoint msg{};
 	//msg.position = {0.0, -1.0, -1.0}; // gazebo: x:-1, y:0, z:1
     //msg.position = {-1.0, 0.0, -1.0}; // gazebo: x:0, y:-1, z:1
-    msg.position = {0.0, 0.0, -1.0};
+    msg.position = {0.0, 0.0, -1.85};
 	// msg.yaw = 3.14159265358979323846/2; 
     msg.yaw = 0.0; 
 	msg.timestamp = this->get_clock()->now().nanoseconds()/1000;

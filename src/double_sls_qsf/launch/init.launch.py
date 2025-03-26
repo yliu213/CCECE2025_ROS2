@@ -23,7 +23,7 @@ def generate_launch_description():
 
     # world path
     world_path = os.path.join(HOME, 'PX4-Autopilot/Tools/simulation/gazebo-classic/sitl_gazebo-classic/worlds/empty.world') # modify gazebo classic world file
-     
+
     # model path
     setup_package_path = get_package_share_directory('setup')
     #world_path = os.path.join(setup_package_path, 'worlds/empty.world') # not working properly
@@ -34,7 +34,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         # Set environment variables for Gazebo and PX4
-        SetEnvironmentVariable('GAZEBO_PLUGIN_PATH', HOME + '/PX4-Autopilot/build/px4_sitl_default/build_gazebo-classic'),
+        SetEnvironmentVariable('GAZEBO_PLUGIN_PATH', HOME + '/PX4-Autopilot/build/px4_sitl_default/build_gazebo-classic'), # px4 v1.16.alpha
+        #SetEnvironmentVariable('GAZEBO_PLUGIN_PATH', HOME + '/PX4-Autopilot/build/px4_sitl_default/build_gazebo'), # px4 v1.13.2
         SetEnvironmentVariable(
             'GAZEBO_MODEL_PATH',
             # Combine PX4 models and custom models
