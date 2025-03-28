@@ -23,6 +23,8 @@
 #include "double_sls_qsf/LowPassFilter.hpp"
 #include "controller_msgs/msg/sls_state.hpp"
 #include "controller_msgs/msg/sls_force.hpp"
+#include "controller_msgs/msg/att_sp.hpp"
+#include "controller_msgs/msg/rate_sp.hpp"
 #include "double_sls_qsf/QSFGeometricController.h"
 #include "double_sls_qsf/nonlinear_attitude_control.h"
 
@@ -139,9 +141,12 @@ public:
         rate_setpoint_publisher_ = this->create_publisher<VehicleRatesSetpoint>("/fmu/in/vehicle_rates_setpoint", 10); 
         //thrust_setpoint_publisher_ = this->create_publisher<VehicleThrustSetpoint>("/fmu/in/vehicle_thrust_setpoint", 10); // for thrust control
 
+        // custom msgs publishers
 		sls_state_raw_pub_ = this->create_publisher<SlsState> ("SLS_QSF_controller/sls_state_raw", 1);
 		sls_state_pub_ = this->create_publisher<SlsState> ("SLS_QSF_controller/sls_state", 1);
 		sls_force_pub_ = this->create_publisher<SlsForce> ("SLS_QSF_controller/sls_force", 1);
+        att_sp_pub_ = this->create_publisher<AttSP>("/SLS_QSF_controller/att_sp", 10);
+        rates_sp_pub_ = this->create_publisher<RateSP>("/SLS_QSF_controller/rate_sp", 10);
 
         // debug publisher
         rate_setpoint_debug_publisher_ = this->create_publisher<VehicleRatesSetpoint>("/SLS_QSF_controller/debug_rate_sp", 10);
@@ -395,6 +400,8 @@ private:
 	rclcpp::Publisher<SlsState>::SharedPtr sls_state_raw_pub_;
 	rclcpp::Publisher<SlsState>::SharedPtr sls_state_pub_;
 	rclcpp::Publisher<SlsForce>::SharedPtr sls_force_pub_;
+    rclcpp::Publisher<AttSP>::SharedPtr att_sp_pub_;
+    rclcpp::Publisher<RateSP>::SharedPtr rates_sp_pub_; 
     rclcpp::Publisher<VehicleAttitudeSetpoint>::SharedPtr attitude_setpoint_publisher_; // for attitude control
     rclcpp::Publisher<VehicleRatesSetpoint>::SharedPtr rate_setpoint_publisher_; // for rate control
     rclcpp::Publisher<VehicleRatesSetpoint>::SharedPtr rate_setpoint_debug_publisher_; // for debug
@@ -759,7 +766,19 @@ void SLSQSF::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &
         msg.thrust_body[0] = 0.0f;
         msg.thrust_body[1] = 0.0f;
         msg.thrust_body[2] = static_cast<float>(-cmd(3)); 
+
+        // for custom att msg pub
+        AttSP att_msg;
+        att_msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
+        Eigen::Quaterniond target_att_enu(target_attitude(0), target_attitude(1), target_attitude(2), target_attitude(3));
+        Eigen::Quaterniond target_att_ned = px4_ros_com::frame_transforms::ros_to_px4_orientation(target_att_enu);
+        att_msg.q_d[0] = static_cast<float>(target_att_ned.w());
+        att_msg.q_d[1] = static_cast<float>(target_att_ned.x());
+        att_msg.q_d[2] = static_cast<float>(target_att_ned.y());
+        att_msg.q_d[3] = static_cast<float>(target_att_ned.z());
+
         rate_setpoint_publisher_ -> publish(msg);
+        att_sp_pub_ -> publish(att_msg);
     } else {
         VehicleAttitudeSetpoint msg;
         msg.timestamp = this->get_clock()->now().nanoseconds()/1000; 
@@ -773,8 +792,19 @@ void SLSQSF::pubRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &
         msg.thrust_body[0] = 0.0f;
         msg.thrust_body[1] = 0.0f;
         msg.thrust_body[2] = static_cast<float>(-cmd(3));
+
+        // for custom rate msg pub
+        RateSP rate_msg;
+        rate_msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
+        Eigen::Vector3d body_rate_flu(cmd(0), cmd(1), cmd(2));  
+        Eigen::Vector3d body_rate_frd = px4_ros_com::frame_transforms::baselink_to_aircraft_body_frame(body_rate_flu);
+        rate_msg.roll  = static_cast<float>(body_rate_frd(0));
+        rate_msg.pitch = static_cast<float>(body_rate_frd(1));
+        rate_msg.yaw   = static_cast<float>(body_rate_frd(2));
+
         attitude_setpoint_publisher_ -> publish(msg);
-    }
+        rates_sp_pub_ -> publish(rate_msg);
+    }    
 }
 
 void SLSQSF::debugRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude) {

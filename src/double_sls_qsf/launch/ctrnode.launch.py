@@ -19,7 +19,7 @@ def generate_launch_description():
                 'mavYaw_': 0.0, # 0.0
                 'Kpos_x_':24.0,
                 'Kpos_y_':24.0,
-                'Kpos_z_':45.0, # 2.0; 10.0(test); 40.0(1); 48.0(2)
+                'Kpos_z_':40.0, # 2.0; 10.0(test); 40.0(1); 48.0(2)
                 'Kvel_x_':50.0,
                 'Kvel_y_':50.0,
                 'Kvel_z_':4.0, # 3.0; 3.0(test); 4.0(1); 4.0(2)
