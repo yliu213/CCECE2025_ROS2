@@ -7,6 +7,7 @@
 #include <px4_msgs/msg/vehicle_rates_setpoint.hpp> // body rate setpoint
 #include <px4_msgs/msg/vehicle_thrust_setpoint.hpp> // thrust setpoint
 #include "px4_ros_com/frame_transforms.h" // for frame transforms
+#include <px4_msgs/msg/vehicle_odometry.hpp> // for vehicle odometry
 
 // ros2 std lib include
 #include <rclcpp/rclcpp.hpp> // ROS2 C++ client library
@@ -54,6 +55,7 @@ public:
         ctrl_enabled_ = this->declare_parameter<bool>("ctrl_enabled_", false);
         rate_ctrl_enabled_ = this->declare_parameter<bool>("rate_ctrl_enabled_", true);
         mission_enabled_ = this->declare_parameter<bool>("mission_enabled_", false);
+        use_onboard_measurements_ = this->declare_parameter<bool>("use_onboard_measurements_", false);
 
 		// Physical Parameters
 		mass_ = this->declare_parameter<double>("mass_", 1.56);
@@ -154,6 +156,7 @@ public:
 
 		// subscribers
 		gazebo_link_state_sub_ = this->create_subscription<gazebo_msgs::msg::LinkStates>("/gazebo/link_states",1000,std::bind(&SLSQSF::gazeboLinkStateCb, this, _1));
+        odom_sub_ = this->create_subscription<VehicleOdometry>("/fmu/out/vehicle_odometry", rclcpp::SensorDataQoS(), std::bind(&SLSQSF::odomCb, this, _1));
 
 		offboard_setpoint_counter_ = 0;
 		Pos_ << 0.0, 0.0, 0.0; // current position
@@ -263,6 +266,12 @@ public:
                 } else if (param.get_name() == "lpf_enabled_"){
                     lpf_enabled_ = param.as_bool();
                     RCLCPP_INFO(this->get_logger(), "Param changed: lpf_enabled_=%s", lpf_enabled_ ? "true" : "false");
+                } else if (param.get_name() == "finite_diff_enabled_"){
+                    finite_diff_enabled_ = param.as_bool();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: finite_diff_enabled_=%s", finite_diff_enabled_ ? "true" : "false");
+                } else if (param.get_name() == "use_onboard_measurements_"){
+                    use_onboard_measurements_ = param.as_bool();
+                    RCLCPP_INFO(this->get_logger(), "Param changed: use_onboard_measurements_=%s", use_onboard_measurements_ ? "true" : "false");
                 } else if (param.get_name() == "Kpos_x_"){
                     Kpos_x_ = param.as_double();
                     RCLCPP_INFO(this->get_logger(), "Param changed: Kpos_x_=%f", Kpos_x_);
@@ -410,6 +419,7 @@ private:
 
 	// subscribers
 	rclcpp::Subscription<gazebo_msgs::msg::LinkStates>::SharedPtr gazebo_link_state_sub_;
+    rclcpp::Subscription<VehicleOdometry>::SharedPtr odom_sub_;
 
 	// time related
 	rclcpp::TimerBase::SharedPtr timer_;
@@ -443,6 +453,7 @@ private:
     bool ctrl_enabled_;
     bool rate_ctrl_enabled_; // flag for rate control
     bool mission_initialized_ = false;
+    bool use_onboard_measurements_ = false; // use px4 onboard measurements 
 
 	// ints
 	uint64_t offboard_setpoint_counter_;
@@ -523,6 +534,7 @@ private:
     void updateReference();
     void checkMissionStage(double mission_time_span);
     void debugRateCommands(const Eigen::Vector4d &cmd, const Eigen::Vector4d &target_attitude);
+    void odomCb(const VehicleOdometry::SharedPtr msg);
 };
 
 void SLSQSF::arm()
@@ -558,7 +570,7 @@ void SLSQSF::publish_trajectory_setpoint()
 	TrajectorySetpoint msg{};
 	//msg.position = {0.0, -1.0, -1.0}; // gazebo: x:-1, y:0, z:1
     //msg.position = {-1.0, 0.0, -1.0}; // gazebo: x:0, y:-1, z:1
-    msg.position = {0.0, 0.0, -1.85};
+    msg.position = {0.0, 0.0, -1.35};
 	// msg.yaw = 3.14159265358979323846/2; 
     msg.yaw = 0.0; 
 	msg.timestamp = this->get_clock()->now().nanoseconds()/1000;
@@ -606,11 +618,12 @@ void SLSQSF::gazeboLinkStateCb(const gazebo_msgs::msg::LinkStates::SharedPtr msg
         RCLCPP_INFO(this->get_logger(), "[gazeboLinkStateCb] Matching Complete");
     }
 
-    if(gazebo_link_name_matched_) {
+    if(gazebo_link_name_matched_ && !use_onboard_measurements_) {
         /* Get Gazebo Link States*/
         // >>> Pose
         // Drone
         Pos_ = toEigen(msg -> pose[drone_link_index_].position); // position
+        //RCLCPP_INFO(this->get_logger(), "Pos_=%f, %f, %f", Pos_(0), Pos_(1), Pos_(2));
         Att_(0) = msg -> pose[drone_link_index_].orientation.w;
         Att_(1) = msg -> pose[drone_link_index_].orientation.x;
         Att_(2) = msg -> pose[drone_link_index_].orientation.y;
@@ -628,12 +641,47 @@ void SLSQSF::gazeboLinkStateCb(const gazebo_msgs::msg::LinkStates::SharedPtr msg
         loadVel_ = toEigen(msg -> twist[10].linear);
         pendRate_ = pendAngle_.cross(loadVel_ - Vel_);
 
-        // since cmdloop never used, so remove the if()
+        // since cmdloop never used, so remove the if() in the ros1 code
     	diff_t_ = this->get_clock()->now().seconds() - gazebo_last_called_.seconds();
         gazebo_last_called_ = this->get_clock()->now();
 
         applyLowPassFilterFiniteDiff();
         exeControl(); 
+    } else {
+        // RCLCPP_INFO(this->get_logger(), "Pos_=%f, %f, %f", Pos_(0), Pos_(1), Pos_(2));
+        Pos_ = toEigen(msg -> pose[drone_link_index_].position);
+        Vel_ = toEigen(msg -> twist[drone_link_index_].linear);
+
+        // the load and pendulum pos, vel are still from gazebo
+        loadPos_ = toEigen(msg -> pose[10].position);
+        pendAngle_ = loadPos_ - Pos_;
+        pendAngle_ = pendAngle_ / pendAngle_.norm();
+        loadVel_ = toEigen(msg -> twist[10].linear);
+        pendRate_ = pendAngle_.cross(loadVel_ - Vel_);
+
+        diff_t_ = this->get_clock()->now().seconds() - gazebo_last_called_.seconds();
+        gazebo_last_called_ = this->get_clock()->now();
+
+        applyLowPassFilterFiniteDiff();
+        exeControl(); 
+    }
+}
+
+void SLSQSF::odomCb(const VehicleOdometry::SharedPtr msg) {
+    if (use_onboard_measurements_) {
+        // Pos_ << msg->position[1], msg->position[0], -(msg->position[2]); // to ENU
+        // RCLCPP_INFO(this->get_logger(), "Pos_=%f, %f, %f", Pos_(0), Pos_(1), Pos_(2));
+        // Vel_ << msg->velocity[1], msg->velocity[0], -(msg->velocity[2]); // to ENU
+
+        Eigen::Vector3d rate_frd(msg->angular_velocity[0], msg->angular_velocity[1], msg->angular_velocity[2]);
+        Rate_ = px4_ros_com::frame_transforms::aircraft_to_baselink_body_frame(rate_frd);
+
+        Eigen::Quaterniond q_ned(msg->q[0], msg->q[1], msg->q[2], msg->q[3]);
+        Eigen::Quaterniond q_enu = px4_ros_com::frame_transforms::px4_to_ros_orientation(q_ned);
+        Att_(0) = q_enu.w();
+        Att_(1) = q_enu.x();
+        Att_(2) = q_enu.y();
+        Att_(3) = q_enu.z();
     }
 }
 
@@ -838,8 +886,7 @@ void SLSQSF::computeBodyRateCmd(Eigen::Vector4d &bodyrate_cmd, const Eigen::Vect
     controller_ -> Update(Att_, q_des_, a_des, targetJerk_); 
     bodyrate_cmd.head(3) = controller_->getDesiredRate();
     double thrust_command = controller_->getDesiredThrust().z();
-    bodyrate_cmd(3) = std::max(0.0, std::min(1.0, norm_thrust_const_ * thrust_command + norm_thrust_offset_));  // original, seems normalized to 0-1
-    //bodyrate_cmd(3) = std::max(0.0, std::min(1.0, 15.103*thrust_command*thrust_command - 341.92*thrust_command + 1935.9)); //polynominal
+    bodyrate_cmd(3) = std::max(0.0, std::min(1.0, norm_thrust_const_ * thrust_command + norm_thrust_offset_));  
     //RCLCPP_INFO(this->get_logger(), "Thrust command: %f", thrust_command); // for motor curve
 }
 
@@ -1157,7 +1204,7 @@ int main(int argc, char *argv[])
 	std::cout << "Starting offboard control node..." << std::endl;
 	setvbuf(stdout, NULL, _IONBF, BUFSIZ); // Disables buffering for standard output (stdout)
 	rclcpp::init(argc, argv);
-	rclcpp::spin(std::make_shared<SLSQSF>()); // 10Hz
+	rclcpp::spin(std::make_shared<SLSQSF>()); 
 
 	rclcpp::shutdown();
 	return 0;

@@ -12,14 +12,15 @@ def generate_launch_description():
                 'lpf_enabled_': False, # True
                 'finite_diff_enabled_': True, # True
                 'traj_tracking_enabled_': False,
-                'drag_comp_enabled_': True, # True
-                'ctrl_enabled_': True, # True
+                'drag_comp_enabled_': True, 
+                'ctrl_enabled_': True, 
                 'rate_ctrl_enabled_': True, # True
                 'mission_enabled_': False,
+                'use_onboard_measurements_': False,
                 'mavYaw_': 0.0, # 0.0
                 'Kpos_x_':24.0,
                 'Kpos_y_':24.0,
-                'Kpos_z_':40.0, # 2.0; 10.0(test); 40.0(1); 48.0(2)
+                'Kpos_z_':40.0, # 10.0; 10.0(test); 40.0(1); 48.0(2)
                 'Kvel_x_':50.0,
                 'Kvel_y_':50.0,
                 'Kvel_z_':4.0, # 3.0; 3.0(test); 4.0(1); 4.0(2)
@@ -29,12 +30,12 @@ def generate_launch_description():
                 'Kjer_x_':10.0,
                 'Kjer_y_':10.0,
                 'Kjer_z_':0.0,
-                'mass_':1.56, #1.56
+                'mass_':1.56, 
                 'cable_length_':0.85,
-                'load_mass_':0.25,
+                'load_mass_':0.25, 
                 'c_x_':0.0,
                 'c_y_':0.0,
-                'c_z_':1.0, # 1.0
+                'c_z_':1.0, 
                 'r_x_':1.0, 
                 'r_y_':1.0, 
                 'r_z_':0.0,
